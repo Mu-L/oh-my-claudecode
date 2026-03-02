@@ -8,6 +8,7 @@ Complete reference for oh-my-claudecode. For quick start, see the main [README.m
 
 - [Installation](#installation)
 - [Configuration](#configuration)
+- [MCP Team Runtime Tools](#mcp-team-runtime-tools)
 - [Agents (28 Total)](#agents-28-total)
 - [Skills (38 Total)](#skills-38-total)
 - [Slash Commands](#slash-commands)
@@ -185,6 +186,23 @@ Tag behavior:
 - `file` callbacks ignore tag options
 
 ---
+
+## MCP Team Runtime Tools
+
+When using the Team MCP server (`bridge/team-mcp.cjs`), these tools are available:
+
+| Tool | Purpose |
+|------|---------|
+| `omc_run_team_start` | Start tmux workers in background and return `jobId` immediately |
+| `omc_run_team_status` | Non-blocking status check for a background team job |
+| `omc_run_team_wait` | Blocking wait with internal polling, backoff, and idle nudge support |
+| `omc_run_team_cleanup` | Explicitly stop worker panes and clear scoped team state directory |
+
+### Runtime status semantics
+
+- **Artifact-first terminal convergence**: `status` and `wait` prefer `{jobId}-result.json` when present.
+- **Deterministic parse-failure handling**: malformed result artifacts are treated as terminal `failed`.
+- **Cleanup scope**: cleanup clears only `.omc/state/team/{teamName}` for the job (never sibling teams).
 
 ## Agents (28 Total)
 

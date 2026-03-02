@@ -8,6 +8,10 @@ var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __commonJS = (cb, mod) => function __require() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
 var __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
     for (let key of __getOwnPropNames(from))
@@ -24,6 +28,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
   mod
 ));
+var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
 // node_modules/jsonc-parser/lib/umd/main.js
 var require_main = __commonJS({
@@ -174,6 +179,13 @@ var require_main = __commonJS({
 });
 
 // src/team/runtime-cli.ts
+var runtime_cli_exports = {};
+__export(runtime_cli_exports, {
+  checkWatchdogFailedMarker: () => checkWatchdogFailedMarker,
+  getTerminalStatus: () => getTerminalStatus,
+  writeResultArtifact: () => writeResultArtifact
+});
+module.exports = __toCommonJS(runtime_cli_exports);
 var import_fs10 = require("fs");
 var import_promises4 = require("fs/promises");
 var import_path13 = require("path");
@@ -1442,8 +1454,8 @@ function watchdogCliWorkers(runtime, intervalMs) {
           unresponsiveCounts.delete(wName);
           await markTaskFromDone(root, runtime.teamName, runtime.cwd, signal.taskId || active.taskId, signal.status, signal.summary);
           try {
-            const { unlink } = await import("fs/promises");
-            await unlink(donePath);
+            const { unlink: unlink2 } = await import("fs/promises");
+            await unlink2(donePath);
           } catch {
           }
           await killWorkerPane(runtime, wName, active.paneId);
@@ -2524,6 +2536,64 @@ async function waitForSentinelReadiness(options = {}) {
 }
 
 // src/team/runtime-cli.ts
+function getTerminalStatus(taskCounts, expectedTaskCount) {
+  const active = taskCounts.pending + taskCounts.inProgress;
+  const terminal = taskCounts.completed + taskCounts.failed;
+  if (active !== 0 || terminal !== expectedTaskCount) return null;
+  return taskCounts.failed > 0 ? "failed" : "completed";
+}
+function parseWatchdogFailedAt(marker) {
+  if (typeof marker.failedAt === "number") return marker.failedAt;
+  if (typeof marker.failedAt === "string") {
+    const numeric = Number(marker.failedAt);
+    if (Number.isFinite(numeric)) return numeric;
+    const parsed = Date.parse(marker.failedAt);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  throw new Error("watchdog marker missing valid failedAt");
+}
+async function checkWatchdogFailedMarker(stateRoot2, startTime) {
+  const markerPath = (0, import_path13.join)(stateRoot2, "watchdog-failed.json");
+  let raw;
+  try {
+    raw = await (0, import_promises4.readFile)(markerPath, "utf-8");
+  } catch (err) {
+    const code = err.code;
+    if (code === "ENOENT") return { failed: false };
+    return { failed: true, reason: `Failed to read watchdog marker: ${err}` };
+  }
+  let marker;
+  try {
+    marker = JSON.parse(raw);
+  } catch (err) {
+    return { failed: true, reason: `Failed to parse watchdog marker: ${err}` };
+  }
+  let failedAt;
+  try {
+    failedAt = parseWatchdogFailedAt(marker);
+  } catch (err) {
+    return { failed: true, reason: `Invalid watchdog marker: ${err}` };
+  }
+  if (failedAt >= startTime) {
+    return { failed: true, reason: `Watchdog marked team failed at ${new Date(failedAt).toISOString()}` };
+  }
+  try {
+    await (0, import_promises4.unlink)(markerPath);
+  } catch {
+  }
+  return { failed: false };
+}
+async function writeResultArtifact(output, finishedAt, jobId = process.env.OMC_JOB_ID, omcJobsDir = process.env.OMC_JOBS_DIR) {
+  if (!jobId || !omcJobsDir) return;
+  const resultPath = (0, import_path13.join)(omcJobsDir, `${jobId}-result.json`);
+  const tmpPath = `${resultPath}.tmp`;
+  await (0, import_promises4.writeFile)(
+    tmpPath,
+    JSON.stringify({ ...output, finishedAt }),
+    "utf-8"
+  );
+  await (0, import_promises4.rename)(tmpPath, resultPath);
+}
 async function writePanesFile(jobId, paneIds, leaderPaneId) {
   const omcJobsDir = process.env.OMC_JOBS_DIR;
   if (!jobId || !omcJobsDir) return;
@@ -2634,6 +2704,13 @@ async function main() {
       duration,
       workerCount
     };
+    const finishedAt = (/* @__PURE__ */ new Date()).toISOString();
+    try {
+      await writeResultArtifact(output, finishedAt);
+    } catch (err) {
+      process.stderr.write(`[runtime-cli] Failed to persist result artifact: ${err}
+`);
+    }
     process.stdout.write(JSON.stringify(output) + "\n");
     process.exit(exitCodeFor(status));
   }
@@ -2653,6 +2730,8 @@ async function main() {
     process.exit(1);
   }
   const jobId = process.env.OMC_JOB_ID;
+  const expectedTaskCount = tasks.length;
+  let mismatchStreak = 0;
   try {
     await writePanesFile(jobId, runtime.workerPaneIds, runtime.leaderPaneId);
   } catch (err) {
@@ -2662,6 +2741,13 @@ async function main() {
   while (pollActive) {
     await new Promise((r) => setTimeout(r, pollIntervalMs));
     if (!pollActive) break;
+    const watchdogCheck = await checkWatchdogFailedMarker(stateRoot2, startTime);
+    if (watchdogCheck.failed) {
+      process.stderr.write(`[runtime-cli] ${watchdogCheck.reason ?? "Watchdog failure marker detected"}
+`);
+      await doShutdown("failed");
+      return;
+    }
     let snap;
     try {
       snap = await monitorTeam(teamName, cwd, runtime.workerPaneIds);
@@ -2680,7 +2766,23 @@ async function main() {
       `[runtime-cli] phase=${snap.phase} pending=${snap.taskCounts.pending} inProgress=${snap.taskCounts.inProgress} completed=${snap.taskCounts.completed} failed=${snap.taskCounts.failed} dead=${snap.deadWorkers.length} monitorMs=${snap.monitorPerformance.totalMs} tasksMs=${snap.monitorPerformance.listTasksMs} workerMs=${snap.monitorPerformance.workerScanMs}
 `
     );
-    if (snap.phase === "completed") {
+    const observedTaskCount = snap.taskCounts.pending + snap.taskCounts.inProgress + snap.taskCounts.completed + snap.taskCounts.failed;
+    if (observedTaskCount !== expectedTaskCount) {
+      mismatchStreak += 1;
+      process.stderr.write(
+        `[runtime-cli] Task-count mismatch observed=${observedTaskCount} expected=${expectedTaskCount} streak=${mismatchStreak}
+`
+      );
+      if (mismatchStreak >= 2) {
+        process.stderr.write("[runtime-cli] Persistent task-count mismatch detected \u2014 failing fast\n");
+        await doShutdown("failed");
+        return;
+      }
+      continue;
+    }
+    mismatchStreak = 0;
+    const terminalStatus = getTerminalStatus(snap.taskCounts, expectedTaskCount);
+    if (terminalStatus === "completed") {
       const sentinelLogPath = (0, import_path13.join)(cwd, "sentinel_stop.jsonl");
       const gateResult = await waitForSentinelReadiness({
         workspace: cwd,
@@ -2697,6 +2799,11 @@ async function main() {
         return;
       }
       await doShutdown("completed");
+      return;
+    }
+    if (terminalStatus === "failed") {
+      process.stderr.write("[runtime-cli] Terminal failure detected from task counts\n");
+      await doShutdown("failed");
       return;
     }
     const allWorkersDead = runtime.workerPaneIds.length > 0 && snap.deadWorkers.length === runtime.workerPaneIds.length;
@@ -2718,3 +2825,9 @@ if (require.main === module) {
     process.exit(1);
   });
 }
+// Annotate the CommonJS export names for ESM import in node:
+0 && (module.exports = {
+  checkWatchdogFailedMarker,
+  getTerminalStatus,
+  writeResultArtifact
+});
