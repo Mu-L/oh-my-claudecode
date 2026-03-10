@@ -342,7 +342,26 @@ function readStateFileWithSession(stateDir, filename, sessionId) {
     if (state) {
       return { state, path: sessionPath, isGlobal: false };
     }
-    // Session path not found — do NOT fall back to legacy
+    // Session path not found — fallback: scan ALL session dirs for a state
+    // whose session_id matches ours (handles path mismatches)
+    try {
+      const allSessionsDir = join(stateDir, 'sessions');
+      if (existsSync(allSessionsDir)) {
+        const dirs = readdirSync(allSessionsDir).filter(d => /^[a-zA-Z0-9]/.test(d));
+        for (const dir of dirs) {
+          const candidatePath = join(allSessionsDir, dir, filename);
+          const candidateState = readJsonFile(candidatePath);
+          if (candidateState && candidateState.session_id === sessionId) {
+            return { state: candidateState, path: candidatePath, isGlobal: false };
+          }
+        }
+      }
+    } catch { /* ignore scan errors */ }
+    // Also check legacy path if its session_id matches
+    const legacyResult = readStateFile(stateDir, filename);
+    if (legacyResult.state && legacyResult.state.session_id === sessionId) {
+      return legacyResult;
+    }
     return { state: null, path: null, isGlobal: false };
   }
   // No sessionId: fall back to legacy path (backward compat)
