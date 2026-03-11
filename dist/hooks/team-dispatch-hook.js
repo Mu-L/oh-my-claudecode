@@ -12,32 +12,12 @@
  * - Max unconfirmed attempts (3) before marking failed
  * - Leader pane missing -> deferred
  */
-import { readFile, writeFile, mkdir, readdir, appendFile, rename, rm, stat } from 'fs/promises';
+import { readFile, readdir, appendFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
-import { dirname, join, resolve } from 'path';
+import { join, resolve } from 'path';
+import { readJsonIfExists, safeString, writeJsonAtomic } from './team-hook-utils.js';
+import { withOwnedLock } from '../team/owned-lock.js';
 // ── Helpers ────────────────────────────────────────────────────────────────
-function safeString(value, fallback = '') {
-    if (typeof value === 'string')
-        return value;
-    if (value === null || value === undefined)
-        return fallback;
-    return String(value);
-}
-async function readJson(path, fallback) {
-    try {
-        const raw = await readFile(path, 'utf8');
-        return JSON.parse(raw);
-    }
-    catch {
-        return fallback;
-    }
-}
-async function writeJsonAtomic(path, value) {
-    await mkdir(dirname(path), { recursive: true });
-    const tmp = `${path}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    await writeFile(tmp, JSON.stringify(value, null, 2));
-    await rename(tmp, path);
-}
 // ── Constants ──────────────────────────────────────────────────────────────
 const DISPATCH_LOCK_STALE_MS = 5 * 60 * 1000;
 const DEFAULT_ISSUE_DISPATCH_COOLDOWN_MS = 15 * 60 * 1000;
@@ -78,99 +58,23 @@ function normalizeTriggerKey(value) {
 // ── Lock ───────────────────────────────────────────────────────────────────
 async function withDispatchLock(teamDirPath, fn) {
     const lockDir = join(teamDirPath, 'dispatch', '.lock');
-    const ownerPath = join(lockDir, 'owner');
-    const ownerToken = `${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}`;
-    const deadline = Date.now() + 5_000;
-    await mkdir(dirname(lockDir), { recursive: true });
-    while (true) {
-        try {
-            await mkdir(lockDir, { recursive: false });
-            try {
-                await writeFile(ownerPath, ownerToken, 'utf8');
-            }
-            catch (error) {
-                await rm(lockDir, { recursive: true, force: true });
-                throw error;
-            }
-            break;
-        }
-        catch (error) {
-            const err = error;
-            if (err.code !== 'EEXIST')
-                throw error;
-            try {
-                const info = await stat(lockDir);
-                if (Date.now() - info.mtimeMs > DISPATCH_LOCK_STALE_MS) {
-                    await rm(lockDir, { recursive: true, force: true });
-                    continue;
-                }
-            }
-            catch { /* best effort */ }
-            if (Date.now() > deadline)
-                throw new Error(`Timed out acquiring dispatch lock for ${teamDirPath}`);
-            await new Promise((r) => setTimeout(r, 25));
-        }
-    }
-    try {
-        return await fn();
-    }
-    finally {
-        try {
-            const currentOwner = await readFile(ownerPath, 'utf8');
-            if (currentOwner.trim() === ownerToken) {
-                await rm(lockDir, { recursive: true, force: true });
-            }
-        }
-        catch { /* best effort */ }
-    }
+    return await withOwnedLock(lockDir, fn, {
+        timeoutMs: 5_000,
+        staleMs: DISPATCH_LOCK_STALE_MS,
+        initialPollMs: 25,
+        maxPollMs: 25,
+        timeoutErrorMessage: `Timed out acquiring dispatch lock for ${teamDirPath}`,
+    });
 }
 async function withMailboxLock(teamDirPath, workerName, fn) {
     const lockDir = join(teamDirPath, 'mailbox', `.lock-${workerName}`);
-    const ownerPath = join(lockDir, 'owner');
-    const ownerToken = `${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}`;
-    const deadline = Date.now() + 5_000;
-    await mkdir(dirname(lockDir), { recursive: true });
-    while (true) {
-        try {
-            await mkdir(lockDir, { recursive: false });
-            try {
-                await writeFile(ownerPath, ownerToken, 'utf8');
-            }
-            catch (error) {
-                await rm(lockDir, { recursive: true, force: true });
-                throw error;
-            }
-            break;
-        }
-        catch (error) {
-            const err = error;
-            if (err.code !== 'EEXIST')
-                throw error;
-            try {
-                const info = await stat(lockDir);
-                if (Date.now() - info.mtimeMs > DISPATCH_LOCK_STALE_MS) {
-                    await rm(lockDir, { recursive: true, force: true });
-                    continue;
-                }
-            }
-            catch { /* best effort */ }
-            if (Date.now() > deadline)
-                throw new Error(`Timed out acquiring mailbox lock for ${teamDirPath}/${workerName}`);
-            await new Promise((r) => setTimeout(r, 25));
-        }
-    }
-    try {
-        return await fn();
-    }
-    finally {
-        try {
-            const currentOwner = await readFile(ownerPath, 'utf8');
-            if (currentOwner.trim() === ownerToken) {
-                await rm(lockDir, { recursive: true, force: true });
-            }
-        }
-        catch { /* best effort */ }
-    }
+    return await withOwnedLock(lockDir, fn, {
+        timeoutMs: 5_000,
+        staleMs: DISPATCH_LOCK_STALE_MS,
+        initialPollMs: 25,
+        maxPollMs: 25,
+        timeoutErrorMessage: `Timed out acquiring mailbox lock for ${teamDirPath}/${workerName}`,
+    });
 }
 // ── Cooldown state ─────────────────────────────────────────────────────────
 function issueCooldownStatePath(teamDirPath) {
@@ -181,7 +85,7 @@ function triggerCooldownStatePath(teamDirPath) {
 }
 async function readIssueCooldownState(teamDirPath) {
     const fallback = { by_issue: {} };
-    const parsed = await readJson(issueCooldownStatePath(teamDirPath), fallback);
+    const parsed = await readJsonIfExists(issueCooldownStatePath(teamDirPath), fallback);
     if (!parsed || typeof parsed !== 'object' || typeof parsed.by_issue !== 'object' || parsed.by_issue === null) {
         return fallback;
     }
@@ -189,7 +93,7 @@ async function readIssueCooldownState(teamDirPath) {
 }
 async function readTriggerCooldownState(teamDirPath) {
     const fallback = { by_trigger: {} };
-    const parsed = await readJson(triggerCooldownStatePath(teamDirPath), fallback);
+    const parsed = await readJsonIfExists(triggerCooldownStatePath(teamDirPath), fallback);
     if (!parsed || typeof parsed !== 'object' || typeof parsed.by_trigger !== 'object' || parsed.by_trigger === null) {
         return fallback;
     }
@@ -312,7 +216,7 @@ async function runProcess(cmd, args, timeoutMs) {
     const result = await execFileAsync(cmd, args, { timeout: timeoutMs });
     return { stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
 }
-async function defaultInjector(request, config, cwd) {
+async function defaultInjector(request, config, _cwd) {
     const target = defaultInjectTarget(request, config);
     if (!target)
         return { ok: false, reason: 'missing_tmux_target' };
@@ -381,7 +285,7 @@ async function updateMailboxNotified(stateDir, teamName, workerName, messageId) 
     const mailboxPath = join(teamDirPath, 'mailbox', `${workerName}.json`);
     const legacyMailboxPath = join(teamDirPath, 'mailbox', `${workerName}.jsonl`);
     return await withMailboxLock(teamDirPath, workerName, async () => {
-        const canonical = await readJson(mailboxPath, { worker: workerName, messages: [] });
+        const canonical = await readJsonIfExists(mailboxPath, { worker: workerName, messages: [] });
         if (canonical && Array.isArray(canonical.messages)) {
             const msg = canonical.messages.find((c) => c?.message_id === messageId);
             if (msg) {
@@ -499,9 +403,9 @@ export async function drainPendingTeamDispatch(options = { cwd: '' }) {
         const requestsPath = join(teamDirPath, 'dispatch', 'requests.json');
         if (!existsSync(requestsPath))
             continue;
-        const config = await readJson(existsSync(manifestPath) ? manifestPath : configPath, {});
+        const config = await readJsonIfExists(existsSync(manifestPath) ? manifestPath : configPath, {});
         await withDispatchLock(teamDirPath, async () => {
-            const requests = await readJson(requestsPath, []);
+            const requests = await readJsonIfExists(requestsPath, []);
             if (!Array.isArray(requests))
                 return;
             const issueCooldownState = await readIssueCooldownState(teamDirPath);

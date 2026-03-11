@@ -34,7 +34,6 @@ export interface LockHandle {
 
 /** Default age (ms) after which a lock file is considered stale. */
 const DEFAULT_STALE_LOCK_MS = 30_000;
-
 /**
  * Check if a process with the given PID is alive.
  * Returns false for PIDs <= 0 or if kill(pid, 0) throws ESRCH.

@@ -536,7 +536,7 @@ A: Higher than single-pass due to iterations, but you're paying for guaranteed c
 A: Yes! Check `.omc/state/ralph-state.json` for iteration log, or use verbose mode: "ralph --verbose: refactor X"
 
 **Q: What happens if I cancel Ralph mid-iteration?**
-A: State is saved. Resume with "resume ralph" or "/oh-my-claudecode:resume-session". It picks up where it left off.
+A: State is saved. Resume with "resume ralph". It picks up where it left off.
 
 **Q: Best practices for Ralph tasks?**
 A:

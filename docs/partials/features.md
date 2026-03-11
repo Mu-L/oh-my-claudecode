@@ -62,10 +62,6 @@ Project-level type checking via `lsp_diagnostics_directory` tool.
 
 **Usage:** Check entire project for errors before commits or after refactoring.
 
-## Session Resume
-
-Background agents can be resumed with full context via `resume-session` tool.
-
 ## Ultrapilot (v3.4)
 
 Parallel autopilot with up to 20 concurrent workers for 3-5x faster execution.

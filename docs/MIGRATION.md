@@ -594,10 +594,6 @@ Project-level type checking via `lsp_diagnostics_directory` tool.
 
 **Usage:** Check entire project for errors before commits or after refactoring.
 
-#### 4. Session Resume
-
-Background agents can be resumed with full context via `resume-session` tool.
-
 ### Migration Steps
 
 Version 3.1 is a drop-in upgrade. No migration required!

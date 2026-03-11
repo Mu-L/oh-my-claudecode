@@ -1,7 +1,7 @@
 /**
  * Edge Case Tests for MCP Team Workers
  *
- * Covers gaps not addressed by the existing 69 tests:
+ * Covers gaps not addressed by the existing team worker tests:
  * - Malformed input handling (bad JSON, unexpected types, missing fields)
  * - Boundary conditions (empty strings, long names, special characters)
  * - File system edge cases (missing files, corrupt data)

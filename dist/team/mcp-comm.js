@@ -8,7 +8,6 @@
  * - queueInboxInstruction: write inbox + enqueue dispatch + notify
  * - queueDirectMailboxMessage: send message + enqueue dispatch + notify
  * - queueBroadcastMailboxMessage: broadcast to all recipients
- * - waitForDispatchReceipt: poll with exponential backoff
  */
 import { enqueueDispatchRequest, readDispatchRequest, transitionDispatchRequest, markDispatchRequestNotified, } from './dispatch-queue.js';
 // ── Internal helpers ───────────────────────────────────────────────────────
@@ -212,24 +211,5 @@ export async function queueBroadcastMailboxMessage(params) {
         }
     }
     return outcomes;
-}
-export async function waitForDispatchReceipt(teamName, requestId, cwd, options) {
-    const timeoutMs = Math.max(0, Math.floor(options.timeoutMs));
-    let currentPollMs = Math.max(25, Math.floor(options.pollMs ?? 50));
-    const maxPollMs = 500;
-    const backoffFactor = 1.5;
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() <= deadline) {
-        const request = await readDispatchRequest(teamName, requestId, cwd);
-        if (!request)
-            return null;
-        if (request.status === 'notified' || request.status === 'delivered' || request.status === 'failed') {
-            return request;
-        }
-        const jitter = Math.random() * currentPollMs * 0.3;
-        await new Promise((resolve) => setTimeout(resolve, currentPollMs + jitter));
-        currentPollMs = Math.min(currentPollMs * backoffFactor, maxPollMs);
-    }
-    return await readDispatchRequest(teamName, requestId, cwd);
 }
 //# sourceMappingURL=mcp-comm.js.map

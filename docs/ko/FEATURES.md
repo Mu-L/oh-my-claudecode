@@ -8,7 +8,6 @@
 3. [디렉토리 진단](#디렉토리-진단)
 4. [동적 프롬프트 생성](#동적-프롬프트-생성)
 5. [에이전트 템플릿](#에이전트-템플릿)
-6. [세션 재개](#세션-재개)
 7. [Autopilot](#autopilot)
 
 ---
@@ -299,57 +298,6 @@ const prompt = generateOrchestratorPrompt(agents);
 - **VERIFICATION CHECKLIST**: 완료 전 점검 항목
 
 **위치:** `src/agents/templates/implementation-template.md`
-
----
-
-## 세션 재개
-
-전체 컨텍스트를 유지한 채 백그라운드 에이전트 세션을 재개하기 위한 래퍼입니다.
-
-### API
-
-```typescript
-resumeSession(input: ResumeSessionInput): ResumeSessionOutput
-```
-
-### 타입
-
-```typescript
-export interface ResumeSessionInput {
-  sessionId: string;
-}
-
-export interface ResumeSessionOutput {
-  success: boolean;
-  context?: {
-    previousPrompt: string;
-    toolCallCount: number;
-    lastToolUsed?: string;
-    lastOutputSummary?: string;
-    continuationPrompt: string;
-  };
-  error?: string;
-}
-```
-
-### 사용 예시
-
-```typescript
-import { resumeSession } from '@/tools/resume-session';
-
-const result = resumeSession({ sessionId: 'ses_abc123' });
-
-if (result.success && result.context) {
-  console.log(`Resuming session with ${result.context.toolCallCount} prior tool calls`);
-
-  // Task 위임으로 계속 진행
-  Task({
-    subagent_type: "oh-my-claudecode:executor",
-    model: "sonnet",
-    prompt: result.context.continuationPrompt
-  });
-}
-```
 
 ---
 

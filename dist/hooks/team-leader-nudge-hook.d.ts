@@ -8,9 +8,8 @@
  * This hook checks all workers' status and if all are idle while
  * tasks remain incomplete, nudges the leader pane to take action.
  */
-export interface TmuxRunner {
-    sendKeys(target: string, text: string, literal?: boolean): Promise<void>;
-}
+import { type TmuxRunner } from './team-hook-utils.js';
+export type { TmuxRunner } from './team-hook-utils.js';
 interface LeaderStalenessResult {
     stale: boolean;
     reason: string;
@@ -38,5 +37,4 @@ export declare function maybeNudgeLeader(params: {
     nudged: boolean;
     reason: string;
 }>;
-export {};
 //# sourceMappingURL=team-leader-nudge-hook.d.ts.map

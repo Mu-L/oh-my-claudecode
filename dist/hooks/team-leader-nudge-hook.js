@@ -8,29 +8,13 @@
  * This hook checks all workers' status and if all are idle while
  * tasks remain incomplete, nudges the leader pane to take action.
  */
-import { readFile, writeFile, mkdir, rename } from 'fs/promises';
+import { readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { appendTeamEvent } from '../team/events.js';
 import { deriveTeamLeaderGuidance } from '../team/leader-nudge-guidance.js';
+import { asNumber, defaultTmux, safeString, writeJsonAtomic } from './team-hook-utils.js';
 // ── Helpers ────────────────────────────────────────────────────────────────
-function safeString(value, fallback = '') {
-    if (typeof value === 'string')
-        return value;
-    if (value === null || value === undefined)
-        return fallback;
-    return String(value);
-}
-function asNumber(value) {
-    if (typeof value === 'number' && Number.isFinite(value))
-        return value;
-    if (typeof value === 'string') {
-        const parsed = Number(value.trim());
-        if (Number.isFinite(parsed))
-            return parsed;
-    }
-    return null;
-}
 async function readJsonSafe(path, fallback) {
     try {
         if (!existsSync(path))
@@ -42,27 +26,6 @@ async function readJsonSafe(path, fallback) {
         return fallback;
     }
 }
-async function writeJsonAtomic(path, value) {
-    const dir = join(path, '..');
-    await mkdir(dir, { recursive: true }).catch(() => { });
-    const tmpPath = `${path}.tmp.${process.pid}.${Date.now()}`;
-    await writeFile(tmpPath, JSON.stringify(value, null, 2));
-    await rename(tmpPath, path);
-}
-async function defaultTmuxSendKeys(target, text, literal = false) {
-    const { execFile } = await import('child_process');
-    const { promisify } = await import('util');
-    const execFileAsync = promisify(execFile);
-    const args = literal
-        ? ['send-keys', '-t', target, '-l', text]
-        : ['send-keys', '-t', target, text];
-    await execFileAsync('tmux', args, { timeout: 3000 });
-}
-const defaultTmux = {
-    async sendKeys(target, text, literal = false) {
-        await defaultTmuxSendKeys(target, text, literal);
-    },
-};
 // ── Config ─────────────────────────────────────────────────────────────────
 const DEFAULT_LEADER_STALE_MS = 120_000; // 2 minutes
 const DEFAULT_NUDGE_COOLDOWN_MS = 60_000; // 1 minute between nudges

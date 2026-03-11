@@ -9,7 +9,6 @@ import {
   shouldAttemptAdaptiveRetry,
   getDefaultShell,
   buildWorkerStartCommand,
-  isUnixLikeOnWindows,
 } from '../tmux-session.js';
 
 afterEach(() => {
@@ -385,9 +384,6 @@ describe('sendToWorker implementation guards', () => {
     expect(source).toContain('Before fallback control keys, re-check copy-mode');
   });
 });
-
-// NOTE: createSession, killSession require tmux to be installed.
-// Gate with: describe.skipIf(!hasTmux)('tmux integration', () => { ... })
 
 function hasTmux(): boolean {
   try {

@@ -12,6 +12,7 @@
  *   workers/{name}/worker-idle-notify.json
  *   all-workers-idle.json
  */
+import { type TmuxRunner } from './team-hook-utils.js';
 export declare function parseTeamWorkerEnv(rawValue: unknown): {
     teamName: string;
     workerName: string;
@@ -19,9 +20,6 @@ export declare function parseTeamWorkerEnv(rawValue: unknown): {
 export declare function resolveWorkerIdleNotifyEnabled(): boolean;
 export declare function resolveWorkerIdleCooldownMs(): number;
 export declare function resolveAllWorkersIdleCooldownMs(): number;
-export interface TmuxRunner {
-    sendKeys(target: string, text: string, literal?: boolean): Promise<void>;
-}
 export declare function updateWorkerHeartbeat(stateDir: string, teamName: string, workerName: string): Promise<void>;
 export declare function maybeNotifyLeaderWorkerIdle(params: {
     cwd: string;

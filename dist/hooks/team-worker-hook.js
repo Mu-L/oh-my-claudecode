@@ -12,27 +12,11 @@
  *   workers/{name}/worker-idle-notify.json
  *   all-workers-idle.json
  */
-import { readFile, writeFile, mkdir, appendFile, rename, stat } from 'fs/promises';
+import { readFile, mkdir, appendFile, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
+import { asNumber, defaultTmux, readJsonIfExists, safeString, writeJsonAtomic } from './team-hook-utils.js';
 // ── Env helpers ────────────────────────────────────────────────────────────
-function safeString(value, fallback = '') {
-    if (typeof value === 'string')
-        return value;
-    if (value === null || value === undefined)
-        return fallback;
-    return String(value);
-}
-function asNumber(value) {
-    if (typeof value === 'number' && Number.isFinite(value))
-        return value;
-    if (typeof value === 'string') {
-        const parsed = Number(value.trim());
-        if (Number.isFinite(parsed))
-            return parsed;
-    }
-    return null;
-}
 export function parseTeamWorkerEnv(rawValue) {
     if (typeof rawValue !== 'string')
         return null;
@@ -91,39 +75,6 @@ function isFreshIso(value, maxAgeMs, nowMs) {
         return false;
     return (nowMs - ts) <= maxAgeMs;
 }
-// ── JSON helpers ───────────────────────────────────────────────────────────
-async function readJsonIfExists(path, fallback) {
-    try {
-        if (!existsSync(path))
-            return fallback;
-        const raw = await readFile(path, 'utf-8');
-        return JSON.parse(raw);
-    }
-    catch {
-        return fallback;
-    }
-}
-async function writeJsonAtomic(path, value) {
-    const dir = join(path, '..');
-    await mkdir(dir, { recursive: true }).catch(() => { });
-    const tmpPath = `${path}.tmp.${process.pid}.${Date.now()}`;
-    await writeFile(tmpPath, JSON.stringify(value, null, 2));
-    await rename(tmpPath, path);
-}
-async function defaultTmuxSendKeys(target, text, literal = false) {
-    const { execFile } = await import('child_process');
-    const { promisify } = await import('util');
-    const execFileAsync = promisify(execFile);
-    const args = literal
-        ? ['send-keys', '-t', target, '-l', text]
-        : ['send-keys', '-t', target, text];
-    await execFileAsync('tmux', args, { timeout: 3000 });
-}
-const defaultTmux = {
-    async sendKeys(target, text, literal = false) {
-        await defaultTmuxSendKeys(target, text, literal);
-    },
-};
 async function readWorkerStatusSnapshot(stateDir, teamName, workerName, nowMs = Date.now()) {
     const statusPath = join(stateDir, 'team', teamName, 'workers', workerName, 'status.json');
     try {

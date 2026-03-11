@@ -218,19 +218,6 @@ export {
   writeWorkerOverlay,
 } from './worker-bootstrap.js';
 
-// tmux-comm
-export {
-  sendTmuxTrigger,
-  queueInboxInstruction,
-  queueDirectMessage,
-  queueBroadcastMessage,
-  readMailbox,
-} from './tmux-comm.js';
-
-// Deprecated backward-compat exports for older layout APIs.
-export { LayoutStabilizer } from './layout-stabilizer.js';
-export type { LayoutStabilizerOptions } from './layout-stabilizer.js';
-
 // phase-controller
 export type { TeamPhase, PhaseableTask } from './phase-controller.js';
 export { inferPhase, getPhaseTransitionLog, isTerminalPhase } from './phase-controller.js';

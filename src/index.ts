@@ -162,9 +162,6 @@ export {
   PLANNER_PROMPT_METADATA,
 } from './agents/index.js';
 
-/** @deprecated Use documentSpecialistAgent instead */
-export { documentSpecialistAgent as researcherAgent } from './agents/document-specialist.js';
-
 // Command expansion utilities for SDK integration
 export {
   expandCommand,

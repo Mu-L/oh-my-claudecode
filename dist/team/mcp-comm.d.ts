@@ -8,7 +8,6 @@
  * - queueInboxInstruction: write inbox + enqueue dispatch + notify
  * - queueDirectMailboxMessage: send message + enqueue dispatch + notify
  * - queueBroadcastMailboxMessage: broadcast to all recipients
- * - waitForDispatchReceipt: poll with exponential backoff
  */
 import { type TeamDispatchRequest, type TeamDispatchRequestInput } from './dispatch-queue.js';
 export interface TeamNotifierTarget {
@@ -92,8 +91,4 @@ export interface QueueBroadcastParams {
     deps: MailboxSender;
 }
 export declare function queueBroadcastMailboxMessage(params: QueueBroadcastParams): Promise<DispatchOutcome[]>;
-export declare function waitForDispatchReceipt(teamName: string, requestId: string, cwd: string, options: {
-    timeoutMs: number;
-    pollMs?: number;
-}): Promise<TeamDispatchRequest | null>;
 //# sourceMappingURL=mcp-comm.d.ts.map
