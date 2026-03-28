@@ -298,6 +298,84 @@ describe('processHook - Routing Matrix', () => {
       }
     });
 
+    it('activates ralplan state when Skill tool invokes ralplan directly', async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-ralplan-skill-'));
+      try {
+        execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+        const sessionId = 'ralplan-skill-session';
+
+        const result = await processHook('pre-tool-use', {
+          sessionId,
+          toolName: 'Skill',
+          toolInput: { skill: 'oh-my-claudecode:ralplan' },
+          directory: tempDir,
+        });
+
+        expect(result.continue).toBe(true);
+
+        const ralplanPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'ralplan-state.json');
+        expect(existsSync(ralplanPath)).toBe(true);
+
+        const ralplanState = JSON.parse(readFileSync(ralplanPath, 'utf-8')) as {
+          active?: boolean;
+          session_id?: string;
+          current_phase?: string;
+          awaiting_confirmation?: boolean;
+        };
+
+        expect(ralplanState.active).toBe(true);
+        expect(ralplanState.session_id).toBe(sessionId);
+        expect(ralplanState.current_phase).toBe('ralplan');
+        expect(ralplanState.awaiting_confirmation).toBeUndefined();
+
+        const stopResult = await processHook('persistent-mode', {
+          sessionId,
+          directory: tempDir,
+          stop_reason: 'end_turn',
+        } as HookInput);
+
+        expect(stopResult.continue).toBe(false);
+        expect(stopResult.message).toContain('ralplan-continuation');
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('activates ralplan state when Skill tool invokes omc-plan in consensus mode', async () => {
+      const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-plan-consensus-skill-'));
+      try {
+        execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+        const sessionId = 'plan-consensus-skill-session';
+
+        const result = await processHook('pre-tool-use', {
+          sessionId,
+          toolName: 'Skill',
+          toolInput: {
+            skill: 'oh-my-claudecode:omc-plan',
+            args: '--consensus issue #1926',
+          },
+          directory: tempDir,
+        });
+
+        expect(result.continue).toBe(true);
+
+        const ralplanPath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'ralplan-state.json');
+        expect(existsSync(ralplanPath)).toBe(true);
+
+        const ralplanState = JSON.parse(readFileSync(ralplanPath, 'utf-8')) as {
+          active?: boolean;
+          session_id?: string;
+          current_phase?: string;
+        };
+
+        expect(ralplanState.active).toBe(true);
+        expect(ralplanState.session_id).toBe(sessionId);
+        expect(ralplanState.current_phase).toBe('ralplan');
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
     it('should handle session-start and return continue:true', async () => {
       const input: HookInput = {
         sessionId: 'test-session',

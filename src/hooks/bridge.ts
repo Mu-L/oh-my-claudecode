@@ -18,12 +18,15 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   unlinkSync,
   writeFileSync,
 } from "fs";
 import { dirname, join } from "path";
 import { resolveToWorktreeRoot, getOmcRoot } from "../lib/worktree-paths.js";
+import { writeModeState } from "../lib/mode-state-io.js";
 import { formatOmcCliInvocation } from "../utils/omc-cli-rendering.js";
+import { createSwallowedErrorLogger } from "../lib/swallowed-error.js";
 
 // Hot-path imports: needed on every/most hook invocations (keyword-detector, pre/post-tool-use)
 import {
@@ -216,7 +219,9 @@ function updateModeAwaitingConfirmation(
         continue;
       }
 
-      writeFileSync(statePath, JSON.stringify(state, null, 2));
+      const tmpPath = `${statePath}.${process.pid}.${Date.now()}.tmp`;
+      writeFileSync(tmpPath, JSON.stringify(state, null, 2));
+      renameSync(tmpPath, statePath);
     } catch {
       // Best-effort state sync only.
     }
@@ -237,6 +242,56 @@ function confirmSkillModeStates(directory: string, skillName: string, sessionId?
   for (const modeName of MODE_CONFIRMATION_SKILL_MAP[skillName] ?? []) {
     updateModeAwaitingConfirmation(directory, modeName, sessionId, false);
   }
+}
+
+function getSkillInvocationArgs(toolInput: unknown): string {
+  if (!toolInput || typeof toolInput !== "object") {
+    return "";
+  }
+
+  const input = toolInput as Record<string, unknown>;
+  const candidates = [
+    input.args,
+    input.arguments,
+    input.argument,
+    input.skill_args,
+    input.skillArgs,
+    input.prompt,
+    input.description,
+    input.input,
+  ];
+
+  return candidates.find((value): value is string => typeof value === "string" && value.trim().length > 0)?.trim() ?? "";
+}
+
+function isConsensusPlanningSkillInvocation(skillName: string | null, toolInput: unknown): boolean {
+  if (!skillName) {
+    return false;
+  }
+
+  if (skillName === "ralplan") {
+    return true;
+  }
+
+  if (skillName !== "omc-plan" && skillName !== "plan") {
+    return false;
+  }
+
+  return getSkillInvocationArgs(toolInput).toLowerCase().includes("--consensus");
+}
+
+function activateRalplanState(directory: string, sessionId?: string): void {
+  writeModeState(
+    "ralplan",
+    {
+      active: true,
+      session_id: sessionId,
+      current_phase: "ralplan",
+      started_at: new Date().toISOString(),
+    },
+    directory,
+    sessionId,
+  );
 }
 
 interface TeamStagedState {
@@ -948,15 +1003,18 @@ async function processPersistentMode(input: HookInput): Promise<HookOutput> {
         const stateDir = join(getOmcRoot(directory), "state");
         if (shouldSendIdleNotification(stateDir, sessionId)) {
           recordIdleNotificationSent(stateDir, sessionId);
+          const logSessionIdleNotifyFailure = createSwallowedErrorLogger(
+            'hooks.bridge session-idle notification failed',
+          );
           import("../notifications/index.js")
             .then(({ notify }) =>
               notify("session-idle", {
                 sessionId,
                 projectPath: directory,
                 profileName: process.env.OMC_NOTIFY_PROFILE,
-              }).catch(() => {}),
+              }).catch(logSessionIdleNotifyFailure),
             )
-            .catch(() => {});
+            .catch(logSessionIdleNotifyFailure);
         }
       }
 
@@ -1040,15 +1098,18 @@ async function processSessionStart(input: HookInput): Promise<HookOutput> {
 
   // Send session-start notification (non-blocking, swallows errors)
   if (sessionId) {
+    const logSessionStartNotifyFailure = createSwallowedErrorLogger(
+      'hooks.bridge session-start notification failed',
+    );
     import("../notifications/index.js")
       .then(({ notify }) =>
         notify("session-start", {
           sessionId,
           projectPath: directory,
           profileName: process.env.OMC_NOTIFY_PROFILE,
-        }).catch(() => {}),
+        }).catch(logSessionStartNotifyFailure),
       )
-      .catch(() => {});
+      .catch(logSessionStartNotifyFailure);
     // Wake OpenClaw gateway for session-start (non-blocking)
     _openclaw.wake("session-start", { sessionId, projectPath: directory });
   }
@@ -1274,6 +1335,10 @@ export function dispatchAskUserQuestionNotification(
       .filter(Boolean)
       .join("; ") || "User input requested";
 
+  const logAskUserQuestionNotifyFailure = createSwallowedErrorLogger(
+    'hooks.bridge ask-user-question notification failed',
+  );
+
   import("../notifications/index.js")
     .then(({ notify }) =>
       notify("ask-user-question", {
@@ -1281,9 +1346,9 @@ export function dispatchAskUserQuestionNotification(
         projectPath: directory,
         question: questionText,
         profileName: process.env.OMC_NOTIFY_PROFILE,
-      }).catch(() => {}),
+      }).catch(logAskUserQuestionNotifyFailure),
     )
-    .catch(() => {});
+    .catch(logAskUserQuestionNotifyFailure);
 }
 
 /** @internal Object wrapper so tests can spy on the dispatch call. */
@@ -1305,9 +1370,12 @@ export const _openclaw = {
     context: import("../openclaw/types.js").OpenClawContext,
   ) => {
     if (process.env.OMC_OPENCLAW !== "1") return;
+    const logOpenClawWakeFailure = createSwallowedErrorLogger(
+      `hooks.bridge openclaw wake failed for ${event}`,
+    );
     import("../openclaw/index.js")
-      .then(({ wakeOpenClaw }) => wakeOpenClaw(event, context).catch(() => {}))
-      .catch(() => {});
+      .then(({ wakeOpenClaw }) => wakeOpenClaw(event, context).catch(logOpenClawWakeFailure))
+      .catch(logOpenClawWakeFailure);
   },
 };
 
@@ -1495,6 +1563,9 @@ function processPreToolUse(input: HookInput): HookOutput {
       try {
         writeSkillActiveState(directory, skillName, input.sessionId, rawSkillName);
         confirmSkillModeStates(directory, skillName, input.sessionId);
+        if (isConsensusPlanningSkillInvocation(skillName, input.toolInput)) {
+          activateRalplanState(directory, input.sessionId);
+        }
       } catch {
         // Skill-state/state-sync writes are best-effort; don't fail the hook on error.
       }
@@ -1514,6 +1585,9 @@ function processPreToolUse(input: HookInput): HookOutput {
     const agentName = agentType?.includes(":")
       ? agentType.split(":").pop()
       : agentType;
+    const logAgentCallNotifyFailure = createSwallowedErrorLogger(
+      'hooks.bridge agent-call notification failed',
+    );
     import("../notifications/index.js")
       .then(({ notify }) =>
         notify("agent-call", {
@@ -1522,9 +1596,9 @@ function processPreToolUse(input: HookInput): HookOutput {
           agentName,
           agentType,
           profileName: process.env.OMC_NOTIFY_PROFILE,
-        }).catch(() => {}),
+        }).catch(logAgentCallNotifyFailure),
       )
-      .catch(() => {});
+      .catch(logAgentCallNotifyFailure);
   }
 
   // Warn about pkill -f self-termination risk (issue #210)

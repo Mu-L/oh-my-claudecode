@@ -512,7 +512,11 @@ Oh-my-claudecode includes 31 lifecycle hooks that enhance Claude Code's behavior
 
 The `code-simplifier` Stop hook automatically delegates recently modified source files to the
 `code-simplifier` agent after each Claude turn. It is **disabled by default** and must be
-explicitly enabled via `~/.omc/config.json`.
+explicitly enabled via the global OMC config file:
+
+- Linux/Unix default: `${XDG_CONFIG_HOME:-~/.config}/omc/config.json`
+- macOS/Windows legacy/default path: `~/.omc/config.json`
+- Existing legacy `~/.omc/config.json` continues to be read as a fallback where applicable.
 
 **Enable:**
 

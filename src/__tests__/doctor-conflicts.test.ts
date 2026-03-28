@@ -6,18 +6,28 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { existsSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, rmSync, mkdtempSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
+import { tmpdir } from 'os';
 
-const TEST_CLAUDE_DIR = join(homedir(), '.claude-test-doctor-conflicts');
-const TEST_PROJECT_DIR = join(homedir(), '.claude-test-doctor-project');
-const TEST_PROJECT_CLAUDE_DIR = join(TEST_PROJECT_DIR, '.claude');
+let TEST_CLAUDE_DIR = '';
+let TEST_PROJECT_DIR = '';
+let TEST_PROJECT_CLAUDE_DIR = '';
+
+function resetTestDirs(): void {
+  TEST_CLAUDE_DIR = mkdtempSync(join(tmpdir(), 'omc-doctor-conflicts-claude-'));
+  TEST_PROJECT_DIR = mkdtempSync(join(tmpdir(), 'omc-doctor-conflicts-project-'));
+  TEST_PROJECT_CLAUDE_DIR = join(TEST_PROJECT_DIR, '.claude');
+}
 
 // Mock getClaudeConfigDir before importing the module under test
-vi.mock('../utils/paths.js', () => ({
-  getClaudeConfigDir: () => TEST_CLAUDE_DIR,
-}));
+vi.mock('../utils/paths.js', async () => {
+  const actual = await vi.importActual<typeof import('../utils/paths.js')>('../utils/paths.js');
+  return {
+    ...actual,
+    getClaudeConfigDir: () => TEST_CLAUDE_DIR,
+  };
+});
 
 // Mock builtin skills to return a known list for testing
 vi.mock('../features/builtin-skills/skills.js', () => ({
@@ -44,11 +54,11 @@ describe('doctor-conflicts: hook ownership classification', () => {
 
   beforeEach(() => {
     for (const dir of [TEST_CLAUDE_DIR, TEST_PROJECT_DIR]) {
-      if (existsSync(dir)) {
+      if (dir && existsSync(dir)) {
         rmSync(dir, { recursive: true, force: true });
       }
     }
-    mkdirSync(TEST_CLAUDE_DIR, { recursive: true });
+    resetTestDirs();
     mkdirSync(TEST_PROJECT_CLAUDE_DIR, { recursive: true });
     process.env.CLAUDE_CONFIG_DIR = TEST_CLAUDE_DIR;
     process.env.CLAUDE_MCP_CONFIG_PATH = join(TEST_CLAUDE_DIR, '..', '.claude.json');
@@ -56,13 +66,13 @@ describe('doctor-conflicts: hook ownership classification', () => {
   });
 
   afterEach(() => {
-    cwdSpy.mockRestore();
+    cwdSpy?.mockRestore();
     delete process.env.CLAUDE_CONFIG_DIR;
     delete process.env.CLAUDE_MCP_CONFIG_PATH;
     delete process.env.OMC_HOME;
     delete process.env.CODEX_HOME;
     for (const dir of [TEST_CLAUDE_DIR, TEST_PROJECT_DIR]) {
-      if (existsSync(dir)) {
+      if (dir && existsSync(dir)) {
         rmSync(dir, { recursive: true, force: true });
       }
     }
@@ -356,11 +366,11 @@ describe('doctor-conflicts: CLAUDE.md companion file detection (issue #1101)', (
 
   beforeEach(() => {
     for (const dir of [TEST_CLAUDE_DIR, TEST_PROJECT_DIR]) {
-      if (existsSync(dir)) {
+      if (dir && existsSync(dir)) {
         rmSync(dir, { recursive: true, force: true });
       }
     }
-    mkdirSync(TEST_CLAUDE_DIR, { recursive: true });
+    resetTestDirs();
     mkdirSync(TEST_PROJECT_CLAUDE_DIR, { recursive: true });
     process.env.CLAUDE_CONFIG_DIR = TEST_CLAUDE_DIR;
     process.env.CLAUDE_MCP_CONFIG_PATH = join(TEST_CLAUDE_DIR, '..', '.claude.json');
@@ -368,13 +378,13 @@ describe('doctor-conflicts: CLAUDE.md companion file detection (issue #1101)', (
   });
 
   afterEach(() => {
-    cwdSpy.mockRestore();
+    cwdSpy?.mockRestore();
     delete process.env.CLAUDE_CONFIG_DIR;
     delete process.env.CLAUDE_MCP_CONFIG_PATH;
     delete process.env.OMC_HOME;
     delete process.env.CODEX_HOME;
     for (const dir of [TEST_CLAUDE_DIR, TEST_PROJECT_DIR]) {
-      if (existsSync(dir)) {
+      if (dir && existsSync(dir)) {
         rmSync(dir, { recursive: true, force: true });
       }
     }
@@ -434,19 +444,19 @@ describe('doctor-conflicts: legacy skills collision check (issue #1101)', () => 
 
   beforeEach(() => {
     for (const dir of [TEST_CLAUDE_DIR, TEST_PROJECT_DIR]) {
-      if (existsSync(dir)) {
+      if (dir && existsSync(dir)) {
         rmSync(dir, { recursive: true, force: true });
       }
     }
-    mkdirSync(TEST_CLAUDE_DIR, { recursive: true });
+    resetTestDirs();
     mkdirSync(TEST_PROJECT_CLAUDE_DIR, { recursive: true });
     cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(TEST_PROJECT_DIR);
   });
 
   afterEach(() => {
-    cwdSpy.mockRestore();
+    cwdSpy?.mockRestore();
     for (const dir of [TEST_CLAUDE_DIR, TEST_PROJECT_DIR]) {
-      if (existsSync(dir)) {
+      if (dir && existsSync(dir)) {
         rmSync(dir, { recursive: true, force: true });
       }
     }
@@ -518,11 +528,11 @@ describe('doctor-conflicts: config known fields (issue #1499)', () => {
 
   beforeEach(() => {
     for (const dir of [TEST_CLAUDE_DIR, TEST_PROJECT_DIR]) {
-      if (existsSync(dir)) {
+      if (dir && existsSync(dir)) {
         rmSync(dir, { recursive: true, force: true });
       }
     }
-    mkdirSync(TEST_CLAUDE_DIR, { recursive: true });
+    resetTestDirs();
     mkdirSync(TEST_PROJECT_CLAUDE_DIR, { recursive: true });
     mkdirSync(join(TEST_PROJECT_DIR, '.omc'), { recursive: true });
     mkdirSync(join(TEST_PROJECT_DIR, '.codex'), { recursive: true });
@@ -534,13 +544,13 @@ describe('doctor-conflicts: config known fields (issue #1499)', () => {
   });
 
   afterEach(() => {
-    cwdSpy.mockRestore();
+    cwdSpy?.mockRestore();
     delete process.env.CLAUDE_CONFIG_DIR;
     delete process.env.CLAUDE_MCP_CONFIG_PATH;
     delete process.env.OMC_HOME;
     delete process.env.CODEX_HOME;
     for (const dir of [TEST_CLAUDE_DIR, TEST_PROJECT_DIR]) {
-      if (existsSync(dir)) {
+      if (dir && existsSync(dir)) {
         rmSync(dir, { recursive: true, force: true });
       }
     }

@@ -62,6 +62,29 @@ var OmcPaths = {
   DEEPINIT_MANIFEST: ".omc/deepinit-manifest.json"
 };
 
+// src/hooks/learner/transliteration-map.ts
+var KOREAN_MAP = {
+  // === deep-dive skill ===
+  "deep dive": ["\uB525\uB2E4\uC774\uBE0C", "\uB525 \uB2E4\uC774\uBE0C"],
+  "deep-dive": ["\uB525\uB2E4\uC774\uBE0C"],
+  "trace and interview": ["\uD2B8\uB808\uC774\uC2A4 \uC564 \uC778\uD130\uBDF0"],
+  // === deep-pipeline skill ===
+  "deep-pipeline": ["\uB525\uD30C\uC774\uD504\uB77C\uC778", "\uB525 \uD30C\uC774\uD504\uB77C\uC778"],
+  "deep-pipe": ["\uB525\uD30C\uC774\uD504"]
+};
+function expandTriggers(triggersLower) {
+  const expanded = new Set(triggersLower);
+  for (const trigger of triggersLower) {
+    const koreanVariants = KOREAN_MAP[trigger];
+    if (koreanVariants) {
+      for (const variant of koreanVariants) {
+        expanded.add(variant);
+      }
+    }
+  }
+  return Array.from(expanded);
+}
+
 // src/hooks/learner/bridge.ts
 var USER_SKILLS_DIR = (0, import_path2.join)(
   (0, import_os2.homedir)(),
@@ -121,7 +144,7 @@ function getSkillMetadataCache(projectRoot) {
         path: candidate.path,
         name,
         triggers,
-        triggersLower: triggers.map((t) => t.toLowerCase()),
+        triggersLower: expandTriggers(triggers.map((t) => t.toLowerCase())),
         matching: parsed.metadata.matching,
         content: parsed.content,
         scope: candidate.scope

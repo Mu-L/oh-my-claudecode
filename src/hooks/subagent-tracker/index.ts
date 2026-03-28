@@ -20,6 +20,7 @@ import { join } from "path";
 import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { recordAgentStart, recordAgentStop } from './session-replay.js';
 import { recordMissionAgentStart, recordMissionAgentStop } from '../../hud/mission-board.js';
+import { isProcessAlive } from '../../platform/index.js';
 
 // ============================================================================
 // Types
@@ -147,19 +148,6 @@ const pendingWrites = new Map<
 
 // Guard against duplicate concurrent flushes per directory
 const flushInProgress = new Set<string>();
-
-/**
- * Check if a process is still alive
- * Signal 0 doesn't kill the process, just checks if it exists
- */
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Synchronous sleep using Atomics.wait
@@ -802,9 +790,21 @@ export function cleanupStaleAgents(directory: string): number {
 /**
  * Get count of active (running) agents
  */
-export function getActiveAgentCount(directory: string): number {
+export interface ActiveAgentSnapshot {
+  count: number;
+  lastUpdatedAt?: string;
+}
+
+export function getActiveAgentSnapshot(directory: string): ActiveAgentSnapshot {
   const state = readTrackingState(directory);
-  return state.agents.filter((a) => a.status === "running").length;
+  return {
+    count: state.agents.filter((a) => a.status === "running").length,
+    lastUpdatedAt: state.last_updated,
+  };
+}
+
+export function getActiveAgentCount(directory: string): number {
+  return getActiveAgentSnapshot(directory).count;
 }
 
 /**

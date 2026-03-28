@@ -12,8 +12,7 @@
 import { existsSync, readFileSync, unlinkSync, statSync, openSync, readSync, closeSync, mkdirSync } from 'fs';
 import { atomicWriteJsonSync } from '../../lib/atomic-write.js';
 import { join } from 'path';
-import { homedir } from 'os';
-import { getClaudeConfigDir } from '../../utils/paths.js';
+import { getClaudeConfigDir, getGlobalOmcConfigCandidates } from '../../utils/paths.js';
 import { readUltraworkState, writeUltraworkState, incrementReinforcement, deactivateUltrawork, getUltraworkPersistenceMessage } from '../ultrawork/index.js';
 import { resolveToWorktreeRoot, resolveSessionStatePath, getOmcRoot } from '../../lib/worktree-paths.js';
 import { readModeState } from '../../lib/mode-state-io.js';
@@ -23,7 +22,7 @@ import { TODO_CONTINUATION_PROMPT } from '../../installer/hooks.js';
 import { isAutopilotActive } from '../autopilot/index.js';
 import { checkAutopilot } from '../autopilot/enforcement.js';
 import { readTeamPipelineState } from '../team-pipeline/state.js';
-import { getActiveAgentCount } from '../subagent-tracker/index.js';
+import { getActiveAgentSnapshot } from '../subagent-tracker/index.js';
 /** Maximum todo-continuation attempts before giving up (prevents infinite loops) */
 const MAX_TODO_CONTINUATION_ATTEMPTS = 5;
 const CANCEL_SIGNAL_TTL_MS = 30_000;
@@ -151,6 +150,8 @@ Do NOT skip this step. Do NOT move on without fixing the error.
  * Get or increment todo-continuation attempt counter
  */
 function trackTodoContinuationAttempt(sessionId) {
+    if (todoContinuationAttempts.size > 200)
+        todoContinuationAttempts.clear();
     const current = todoContinuationAttempts.get(sessionId) || 0;
     const next = current + 1;
     todoContinuationAttempts.set(sessionId, next);
@@ -163,22 +164,24 @@ export function resetTodoContinuationAttempts(sessionId) {
     todoContinuationAttempts.delete(sessionId);
 }
 /**
- * Read the session-idle notification cooldown in seconds from ~/.omc/config.json.
+ * Read the session-idle notification cooldown in seconds from global OMC config.
  * Default: 60 seconds. 0 = disabled (no cooldown).
  */
 export function getIdleNotificationCooldownSeconds() {
-    const configPath = join(homedir(), '.omc', 'config.json');
-    try {
-        if (!existsSync(configPath))
+    for (const configPath of getGlobalOmcConfigCandidates('config.json')) {
+        try {
+            if (!existsSync(configPath))
+                continue;
+            const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+            const cooldown = config?.notificationCooldown;
+            const val = cooldown?.sessionIdleSeconds;
+            if (typeof val === 'number' && Number.isFinite(val))
+                return Math.max(0, val);
             return 60;
-        const config = JSON.parse(readFileSync(configPath, 'utf-8'));
-        const cooldown = config?.notificationCooldown;
-        const val = cooldown?.sessionIdleSeconds;
-        if (typeof val === 'number' && Number.isFinite(val))
-            return Math.max(0, val);
-    }
-    catch {
-        // ignore parse errors
+        }
+        catch {
+            return 60;
+        }
     }
     return 60;
 }
@@ -701,6 +704,7 @@ When done, run \`/oh-my-claudecode:cancel\` to cleanly exit.
 // ---------------------------------------------------------------------------
 const RALPLAN_STOP_BLOCKER_MAX = 30;
 const RALPLAN_STOP_BLOCKER_TTL_MS = 45 * 60 * 1000; // 45 min
+const RALPLAN_ACTIVE_AGENT_RECENCY_WINDOW_MS = 5_000;
 /**
  * Check Ralplan state for standalone ralplan mode enforcement.
  * Ralplan state is written by the MCP state_write tool.
@@ -736,10 +740,16 @@ async function checkRalplan(sessionId, directory, cancelInProgress) {
             mode: 'ralplan'
         };
     }
-    // Orchestrators are allowed to go idle while delegated work is still active.
-    // Delegation waits are expected, so clear any accumulated breaker budget and
-    // let enforcement resume from a clean slate after the running subagents finish.
-    if (getActiveAgentCount(workingDir) > 0) {
+    // Orchestrators are allowed to go idle while delegated work is still active,
+    // but the raw running-agent count can lag behind the real lifecycle because
+    // SubagentStop/post-tool-use bookkeeping lands after the stop event. Only
+    // trust the bypass when the tracker itself was updated recently enough to
+    // look live; otherwise fail closed and keep consensus enforcement active.
+    const activeAgents = getActiveAgentSnapshot(workingDir);
+    const activeAgentStateUpdatedAt = activeAgents.lastUpdatedAt ? new Date(activeAgents.lastUpdatedAt).getTime() : NaN;
+    const hasFreshActiveAgentState = Number.isFinite(activeAgentStateUpdatedAt)
+        && Date.now() - activeAgentStateUpdatedAt <= RALPLAN_ACTIVE_AGENT_RECENCY_WINDOW_MS;
+    if (activeAgents.count > 0 && hasFreshActiveAgentState) {
         writeStopBreaker(workingDir, 'ralplan', 0, sessionId);
         return {
             shouldBlock: false,

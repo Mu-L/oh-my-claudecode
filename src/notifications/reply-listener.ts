@@ -19,10 +19,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, chmodSync, statSync, appendFileSync, renameSync } from 'fs';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
-import { homedir } from 'os';
 import { spawn } from 'child_process';
 import { request as httpsRequest } from 'https';
 import { resolveDaemonModulePath } from '../utils/daemon-module-path.js';
+import { getGlobalOmcStateRoot } from '../utils/paths.js';
 import {
   capturePaneContent,
   sendToPane,
@@ -37,6 +37,7 @@ import {
 import type { ReplyConfig } from './types.js';
 import { parseMentionAllowedMentions } from './config.js';
 import { redactTokens } from './redact.js';
+import { isProcessAlive } from '../platform/index.js';
 import {
   validateSlackMessage,
   SlackConnectionStateTracker,
@@ -75,7 +76,7 @@ const DAEMON_ENV_ALLOWLIST = [
 ] as const;
 
 /** Default paths */
-const DEFAULT_STATE_DIR = join(homedir(), '.omc', 'state');
+const DEFAULT_STATE_DIR = getGlobalOmcStateRoot();
 const PID_FILE_PATH = join(DEFAULT_STATE_DIR, 'reply-listener.pid');
 const STATE_FILE_PATH = join(DEFAULT_STATE_DIR, 'reply-listener-state.json');
 const LOG_FILE_PATH = join(DEFAULT_STATE_DIR, 'reply-listener.log');
@@ -276,18 +277,6 @@ function removePidFile(): void {
 }
 
 /**
- * Check if a process is running
- */
-function isProcessRunning(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Check if daemon is currently running
  */
 export function isDaemonRunning(): boolean {
@@ -296,7 +285,7 @@ export function isDaemonRunning(): boolean {
     return false;
   }
 
-  if (!isProcessRunning(pid)) {
+  if (!isProcessAlive(pid)) {
     removePidFile();
     return false;
   }
@@ -1008,7 +997,7 @@ export function stopReplyListener(): DaemonResponse {
     };
   }
 
-  if (!isProcessRunning(pid)) {
+  if (!isProcessAlive(pid)) {
     removePidFile();
     return {
       success: true,
