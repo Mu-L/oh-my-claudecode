@@ -776,10 +776,23 @@ describe('isMinimaxHost', () => {
     expect(isMinimaxHost('https://foo.bar.minimax.io')).toBe(true);
   });
 
-  it('rejects hosts that merely contain minimax.io as substring', () => {
+  it('accepts minimaxi.com (China endpoint)', () => {
+    expect(isMinimaxHost('https://minimaxi.com')).toBe(true);
+    expect(isMinimaxHost('https://api.minimaxi.com')).toBe(true);
+    expect(isMinimaxHost('https://api.minimaxi.com/anthropic')).toBe(true);
+  });
+
+  it('accepts minimax.com (China alternative)', () => {
+    expect(isMinimaxHost('https://minimax.com')).toBe(true);
+    expect(isMinimaxHost('https://api.minimax.com')).toBe(true);
+    expect(isMinimaxHost('https://api.minimax.com/anthropic')).toBe(true);
+  });
+
+  it('rejects hosts that merely contain minimax as substring', () => {
     expect(isMinimaxHost('https://minimax.io.evil.tld')).toBe(false);
     expect(isMinimaxHost('https://notminimax.io')).toBe(false);
     expect(isMinimaxHost('https://minimax.io.example.com')).toBe(false);
+    expect(isMinimaxHost('https://minimaxi.com.evil.tld')).toBe(false);
   });
 
   it('rejects unrelated hosts', () => {

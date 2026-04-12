@@ -107,13 +107,21 @@ export function isZaiHost(urlString: string): boolean {
 }
 
 /**
- * Check if a URL points to MiniMax (exact hostname match)
+ * Check if a URL points to MiniMax.
+ * Matches all known MiniMax domains:
+ *   - minimax.io / *.minimax.io  (international)
+ *   - minimaxi.com / *.minimaxi.com  (China)
+ *   - minimax.com / *.minimax.com  (China alternative)
  */
 export function isMinimaxHost(urlString: string): boolean {
   try {
     const url = new URL(urlString);
     const hostname = url.hostname.toLowerCase();
-    return hostname === 'minimax.io' || hostname.endsWith('.minimax.io');
+    return (
+      hostname === 'minimax.io' || hostname.endsWith('.minimax.io') ||
+      hostname === 'minimaxi.com' || hostname.endsWith('.minimaxi.com') ||
+      hostname === 'minimax.com' || hostname.endsWith('.minimax.com')
+    );
   } catch {
     return false;
   }
