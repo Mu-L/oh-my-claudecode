@@ -126,6 +126,13 @@ export interface TeamSnapshotV2 {
     status: WorkerStatus;
     heartbeat: WorkerHeartbeat | null;
     assignedTasks: string[];
+    working_dir?: string;
+    worktree_repo_root?: string;
+    worktree_path?: string;
+    worktree_branch?: string;
+    worktree_detached?: boolean;
+    worktree_created?: boolean;
+    team_state_root?: string;
     turnsWithoutProgress: number;
   }>;
   tasks: {
@@ -1427,6 +1434,13 @@ export async function monitorTeamV2(
       status,
       heartbeat,
       assignedTasks: w.assigned_tasks,
+      working_dir: w.working_dir,
+      worktree_repo_root: w.worktree_repo_root,
+      worktree_path: w.worktree_path,
+      worktree_branch: w.worktree_branch,
+      worktree_detached: w.worktree_detached,
+      worktree_created: w.worktree_created,
+      team_state_root: w.team_state_root,
       turnsWithoutProgress,
     });
 

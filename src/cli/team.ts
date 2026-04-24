@@ -513,6 +513,10 @@ export async function teamStatusByTeamName(teamName: string, cwd = process.cwd()
           .map((worker) => worker.pane_id)
           .filter((paneId): paneId is string => typeof paneId === 'string' && paneId.trim().length > 0),
       )),
+      workspaceMode: config?.workspace_mode,
+      worktreeMode: config?.worktree_mode,
+      teamStateRoot: config?.team_state_root,
+      workers: config?.workers ?? [],
       snapshot,
     };
   }
