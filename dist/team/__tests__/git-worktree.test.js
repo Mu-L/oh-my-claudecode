@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
-import { createWorkerWorktree, removeWorkerWorktree, listTeamWorktrees, cleanupTeamWorktrees, } from '../git-worktree.js';
+import { createWorkerWorktree, removeWorkerWorktree, listTeamWorktrees, cleanupTeamWorktrees, ensureWorkerWorktree, } from '../git-worktree.js';
 describe('git-worktree', () => {
     let repoDir;
     const teamName = 'test-wt';
@@ -28,9 +28,7 @@ describe('git-worktree', () => {
     describe('createWorkerWorktree', () => {
         it('creates worktree at correct path', () => {
             const info = createWorkerWorktree(teamName, 'worker1', repoDir);
-            expect(info.path).toContain('.omc/team/test-wt/worktrees');
-            expect(info.created).toBe(true);
-            expect(info.reused).toBe(false);
+            expect(info.path).toContain(`.omc/team/${teamName}/worktrees/worker1`);
             expect(info.branch).toBe(`omc-team/${teamName}/worker1`);
             expect(info.workerName).toBe('worker1');
             expect(info.teamName).toBe(teamName);
@@ -51,16 +49,29 @@ describe('git-worktree', () => {
             expect(info2.created).toBe(false);
             expect(info2.reused).toBe(true);
         });
-        it('cleans up a stale plain directory before creating the worktree', () => {
+        it('rejects a stale plain directory instead of deleting files', () => {
             const stalePath = join(repoDir, '.omc', 'team', teamName, 'worktrees', 'worker-stale');
-            // Create a directory that is not registered as a git worktree.
             rmSync(stalePath, { recursive: true, force: true });
             mkdirSync(stalePath, { recursive: true });
             writeFileSync(join(stalePath, 'orphan.txt'), 'orphaned state');
-            const info = createWorkerWorktree(teamName, 'worker-stale', repoDir);
-            expect(info.path).toBe(stalePath);
-            expect(existsSync(join(stalePath, 'orphan.txt'))).toBe(false);
-            expect(existsSync(info.path)).toBe(true);
+            expect(() => createWorkerWorktree(teamName, 'worker-stale', repoDir)).toThrow(/worktree_path_mismatch/);
+            expect(existsSync(join(stalePath, 'orphan.txt'))).toBe(true);
+        });
+        it('plans detached worktrees under canonical native team path', () => {
+            const info = ensureWorkerWorktree(teamName, 'worker-detached', repoDir, {
+                mode: 'detached',
+                requireCleanLeader: false,
+            });
+            expect(info?.path).toContain(`.omc/team/${teamName}/worktrees/worker-detached`);
+            expect(info?.detached).toBe(true);
+            expect(info?.created).toBe(true);
+            expect(info?.reused).toBe(false);
+        });
+        it('preserves dirty existing worktrees', () => {
+            const info = createWorkerWorktree(teamName, 'worker-dirty', repoDir);
+            writeFileSync(join(info.path, 'dirty.txt'), 'dirty');
+            expect(() => createWorkerWorktree(teamName, 'worker-dirty', repoDir)).toThrow(/worktree_dirty/);
+            expect(existsSync(join(info.path, 'dirty.txt'))).toBe(true);
         });
     });
     describe('removeWorkerWorktree', () => {
