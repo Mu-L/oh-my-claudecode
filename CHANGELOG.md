@@ -1,19 +1,22 @@
-# oh-my-claudecode v5.5.0: jev — judgment, fall back to, absorb grilling's frontier-rounds
+# oh-my-claudecode v5.5.0: jev — advisory, point registry and, jev — ralph
 
 ## Release Notes
 
-Release with **19 new features**, **20 bug fixes**, **1 other change** across **47 merged PRs**.
+Release with **22 new features**, **24 bug fixes**, **5 other changes** across **57 merged PRs**.
 
 ### Highlights
 
+- **feat(hooks): jev — advisory points batch and script-side channel ADR** (#4075)
+- **feat(jev): point registry and shadow eval tool — unify the judgment-point program** (#4065)
+- **feat(hooks): jev — ralph completion verdict and task-size shadow points** (#4064)
 - **feat(hooks): jev — judgment points with heuristic degradation** (#4058)
 - **feat(hud): fall back to rate-limit headers for setup-token usage** (#4057)
-- **feat(deep-interview): absorb grilling's frontier-rounds questioning from mattpocock/skills#647** (#4052)
-- **perf(hud): throttle and batch the shared cache sweep (fix #4045)** (#4051)
-- **feat(skills): state the run numbers in the launch C5 completion report** (#4050)
 
 ### New Features
 
+- **feat(hooks): jev — advisory points batch and script-side channel ADR** (#4075)
+- **feat(jev): point registry and shadow eval tool — unify the judgment-point program** (#4065)
+- **feat(hooks): jev — ralph completion verdict and task-size shadow points** (#4064)
 - **feat(hooks): jev — judgment points with heuristic degradation** (#4058)
 - **feat(hud): fall back to rate-limit headers for setup-token usage** (#4057)
 - **feat(deep-interview): absorb grilling's frontier-rounds questioning from mattpocock/skills#647** (#4052)
@@ -36,6 +39,10 @@ Release with **19 new features**, **20 bug fixes**, **1 other change** across **
 
 ### Bug Fixes
 
+- **fix(session-end): record why a release left the job recoverable (#4076)** (#4076)
+- **fix(config): validate background task env limit** (#4074)
+- **fix(preflight): reject malformed context threshold overrides** (#4071)
+- **fix(read-budget): reject malformed env budget overrides** (#4070)
 - **fix(read-budget): skip binaries, honor pages, reorder remedy, add maxBytes (#4062)** (#4062)
 - **fix(team): bind native team lifecycle to an immutable instance id** (#4059)
 - **fix(hooks): enforce the read budget in pre-tool-enforcer (#4054)** (#4054)
@@ -61,10 +68,18 @@ Release with **19 new features**, **20 bug fixes**, **1 other change** across **
 
 - **refactor(skills): read the drydock language contract from launch instead of inlining it** (#4047)
 
+### Documentation
+
+- **docs: add plugin-dir conflict verification note** (#4069)
+
 ### Other Changes
 
+- **chore(inventory): rebind v5.5.0 release baseline**
+- **chore(build): rebuild generated artifacts for the v5.5.0 release head**
+- **chore(inventory): regenerate baseline at the release head**
+- **chore(inventory): regenerate baseline at the release head**
 - **chore(inventory): refresh the baseline for the audit-contract SKILL.md deltas**
 
 ### Stats
 
-- **47 PRs merged** | **19 new features** | **20 bug fixes** | **0 security/hardening improvements** | **1 other change**
+- **57 PRs merged** | **22 new features** | **24 bug fixes** | **0 security/hardening improvements** | **5 other changes**
