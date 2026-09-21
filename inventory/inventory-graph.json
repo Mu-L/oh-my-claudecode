@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "3ddf00be862b1a2c9c207542f0bf70098deae5b8",
-    "sourceSha256": "b884fbff30193dcfa256e0226dfc33f5f2c61617d6f9ee63b88d36f9ebbc2962",
+    "head": "020e06c34498aadaa6fbc16263904ce7e698895e",
+    "sourceSha256": "cfd63e85c3a8f911ca67eba5db6f54faee71eb3f3476797cd89d2050bc1971a4",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "3ddf00be862b1a2c9c207542f0bf70098deae5b8",
-  "sourceSha256": "b884fbff30193dcfa256e0226dfc33f5f2c61617d6f9ee63b88d36f9ebbc2962",
+  "head": "020e06c34498aadaa6fbc16263904ce7e698895e",
+  "sourceSha256": "cfd63e85c3a8f911ca67eba5db6f54faee71eb3f3476797cd89d2050bc1971a4",
   "counts": {
     "public": {
       "skills": 43,
@@ -749,6 +749,7 @@
       "scripts/build-claude-md-coordinator.mjs",
       "scripts/build-cli.mjs",
       "scripts/build-contained-fs.mjs",
+      "scripts/build-generated-artifact-authorization.mjs",
       "scripts/build-mcp-server.mjs",
       "scripts/build-prompt-ssot.ts",
       "scripts/build-runtime-cli.mjs",
@@ -33463,6 +33464,11 @@
         "path": "scripts/build-contained-fs.mjs"
       },
       {
+        "id": "scripts/build-generated-artifact-authorization.mjs",
+        "kind": "script",
+        "path": "scripts/build-generated-artifact-authorization.mjs"
+      },
+      {
         "id": "scripts/build-mcp-server.mjs",
         "kind": "script",
         "path": "scripts/build-mcp-server.mjs"
@@ -42212,6 +42218,21 @@
       {
         "from": "scripts/build-contained-fs.mjs",
         "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/build-generated-artifact-authorization.mjs",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/build-generated-artifact-authorization.mjs",
+        "to": "external:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/build-generated-artifact-authorization.mjs",
+        "to": "external:fs",
         "kind": "imports"
       },
       {
@@ -80521,12 +80542,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7044,
-      "edgeCount": 7766,
-      "importEdgeCount": 6385,
+      "nodeCount": 7045,
+      "edgeCount": 7769,
+      "importEdgeCount": 6388,
       "registerEdgeCount": 64
     }
   },
-  "inventorySha256": "89925dc9ede73d4b3650c4687ef4a14d2a2d9a970db4d142391ecf78f448b704",
-  "manifestSha256": "d1007c14050581dd63e35736f9b41d40c81e30bba706bb8f299255f1508530f7"
+  "inventorySha256": "67a75907992cf8ed2132f9756b7a31925422748096044d4a7ce8939ab6a2ecfd",
+  "manifestSha256": "dc5ad9cdee3d3228f74a66bfd92b41d5a054e95e29f9e8d17de7b4b8ac7fc811"
 }
