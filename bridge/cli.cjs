@@ -4307,6 +4307,11 @@ function deepMerge(target, source) {
   }
   return result;
 }
+function parseBackgroundTaskLimit(value) {
+  if (typeof value !== "string" || !/^[1-9]\d*$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed <= MAX_BACKGROUND_TASKS ? parsed : null;
+}
 function loadEnvConfig() {
   const config2 = {};
   if (process.env.EXA_API_KEY) {
@@ -4327,14 +4332,14 @@ function loadEnvConfig() {
       lspTools: process.env.OMC_LSP_TOOLS === "true"
     };
   }
-  if (process.env.OMC_MAX_BACKGROUND_TASKS) {
-    const maxTasks = parseInt(process.env.OMC_MAX_BACKGROUND_TASKS, 10);
-    if (!isNaN(maxTasks)) {
-      config2.permissions = {
-        ...config2.permissions,
-        maxBackgroundTasks: maxTasks
-      };
-    }
+  const maxBackgroundTasks = parseBackgroundTaskLimit(
+    process.env.OMC_MAX_BACKGROUND_TASKS
+  );
+  if (maxBackgroundTasks !== null) {
+    config2.permissions = {
+      ...config2.permissions,
+      maxBackgroundTasks
+    };
   }
   if (process.env.OMC_ROUTING_ENABLED !== void 0) {
     config2.routing = {
@@ -4775,7 +4780,7 @@ ${content}`;
   }
   return contexts.join(separator);
 }
-var import_fs3, import_path4, DEFAULT_CONFIG, CANONICAL_TEAM_ROLE_SET, KNOWN_AGENT_NAME_SET, TEAM_ROLE_PROVIDERS, TEAM_ROLE_TIERS, AUTOPILOT_EXECUTION_BACKENDS, AUTOPILOT_PLANNING_MODES, AUTOPILOT_TEAM_AGENT_TYPES, AUTOPILOT_WORKFLOW_NAME, AUTOPILOT_WORKFLOW_RESERVED_NAMES, AUTOPILOT_WORKFLOW_SEQUENCES, OMC_STARTUP_COMPACTABLE_SECTIONS, OMC_STARTUP_GUIDANCE_MAX_CHARS, OMC_CONTEXT_FILES_MAX_CHARS;
+var import_fs3, import_path4, DEFAULT_CONFIG, MAX_BACKGROUND_TASKS, CANONICAL_TEAM_ROLE_SET, KNOWN_AGENT_NAME_SET, TEAM_ROLE_PROVIDERS, TEAM_ROLE_TIERS, AUTOPILOT_EXECUTION_BACKENDS, AUTOPILOT_PLANNING_MODES, AUTOPILOT_TEAM_AGENT_TYPES, AUTOPILOT_WORKFLOW_NAME, AUTOPILOT_WORKFLOW_RESERVED_NAMES, AUTOPILOT_WORKFLOW_SEQUENCES, OMC_STARTUP_COMPACTABLE_SECTIONS, OMC_STARTUP_GUIDANCE_MAX_CHARS, OMC_CONTEXT_FILES_MAX_CHARS;
 var init_loader = __esm({
   "src/config/loader.ts"() {
     "use strict";
@@ -4788,6 +4793,7 @@ var init_loader = __esm({
     init_types2();
     init_delegation_routing();
     DEFAULT_CONFIG = buildDefaultConfig();
+    MAX_BACKGROUND_TASKS = 50;
     CANONICAL_TEAM_ROLE_SET = new Set(CANONICAL_TEAM_ROLES);
     KNOWN_AGENT_NAME_SET = new Set(KNOWN_AGENT_NAMES);
     TEAM_ROLE_PROVIDERS = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor", "antigravity"]);
@@ -47777,6 +47783,786 @@ var init_auto_update = __esm({
   }
 });
 
+// src/hooks/task-size-detector/index.ts
+function countWords(text) {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+function detectEscapeHatch(text) {
+  const trimmed = text.trim().toLowerCase();
+  for (const prefix of ESCAPE_HATCH_PREFIXES) {
+    if (trimmed.startsWith(prefix)) {
+      return prefix;
+    }
+  }
+  return null;
+}
+function hasSmallTaskSignals(text) {
+  return SMALL_TASK_SIGNALS.some((pattern) => pattern.test(text));
+}
+function hasLargeTaskSignals(text) {
+  return LARGE_TASK_SIGNALS.some((pattern) => pattern.test(text));
+}
+function classifyTaskSize(text, thresholds = DEFAULT_THRESHOLDS) {
+  const wordCount = countWords(text);
+  const escapePrefix = detectEscapeHatch(text);
+  if (escapePrefix !== null) {
+    return {
+      size: "small",
+      reason: `Escape hatch prefix detected: "${escapePrefix}"`,
+      wordCount,
+      hasEscapeHatch: true,
+      escapePrefixUsed: escapePrefix
+    };
+  }
+  const hasLarge = hasLargeTaskSignals(text);
+  const hasSmall = hasSmallTaskSignals(text);
+  if (hasLarge) {
+    return {
+      size: "large",
+      reason: "Large task signals detected (architecture/refactor/cross-cutting scope)",
+      wordCount,
+      hasEscapeHatch: false
+    };
+  }
+  if (wordCount > thresholds.largeWordLimit) {
+    return {
+      size: "large",
+      reason: `Prompt length (${wordCount} words) exceeds large task threshold (${thresholds.largeWordLimit})`,
+      wordCount,
+      hasEscapeHatch: false
+    };
+  }
+  if (hasSmall && !hasLarge) {
+    return {
+      size: "small",
+      reason: "Small task signals detected (single file / minor change)",
+      wordCount,
+      hasEscapeHatch: false
+    };
+  }
+  if (wordCount <= thresholds.smallWordLimit) {
+    return {
+      size: "small",
+      reason: `Prompt length (${wordCount} words) is within small task threshold (${thresholds.smallWordLimit})`,
+      wordCount,
+      hasEscapeHatch: false
+    };
+  }
+  return {
+    size: "medium",
+    reason: `Prompt length (${wordCount} words) is in medium range`,
+    wordCount,
+    hasEscapeHatch: false
+  };
+}
+function isHeavyMode(keywordType) {
+  return HEAVY_MODE_KEYWORDS.has(keywordType);
+}
+var DEFAULT_THRESHOLDS, ESCAPE_HATCH_PREFIXES, SMALL_TASK_SIGNALS, LARGE_TASK_SIGNALS, HEAVY_MODE_KEYWORDS;
+var init_task_size_detector = __esm({
+  "src/hooks/task-size-detector/index.ts"() {
+    "use strict";
+    DEFAULT_THRESHOLDS = {
+      smallWordLimit: 50,
+      largeWordLimit: 200
+    };
+    ESCAPE_HATCH_PREFIXES = [
+      "quick:",
+      "simple:",
+      "tiny:",
+      "minor:",
+      "small:",
+      "just:",
+      "only:"
+    ];
+    SMALL_TASK_SIGNALS = [
+      /\btypo\b/i,
+      /\bspelling\b/i,
+      /\brename\s+\w+\s+to\b/i,
+      /\bone[\s-]liner?\b/i,
+      /\bone[\s-]line\s+fix\b/i,
+      /\bsingle\s+file\b/i,
+      /\bin\s+this\s+file\b/i,
+      /\bthis\s+function\b/i,
+      /\bthis\s+line\b/i,
+      /\bminor\s+(fix|change|update|tweak)\b/i,
+      /\bfix\s+(a\s+)?typo\b/i,
+      /\badd\s+a?\s*comment\b/i,
+      /\bwhitespace\b/i,
+      /\bindentation\b/i,
+      /\bformat(ting)?\s+(this|the)\b/i,
+      /\bquick\s+fix\b/i,
+      /\bsmall\s+(fix|change|tweak|update)\b/i,
+      /\bupdate\s+(the\s+)?version\b/i,
+      /\bbump\s+version\b/i
+    ];
+    LARGE_TASK_SIGNALS = [
+      /\barchitect(ure|ural)?\b/i,
+      /\brefactor\b/i,
+      /\bredesign\b/i,
+      /\bfrom\s+scratch\b/i,
+      /\bcross[\s-]cutting\b/i,
+      /\bentire\s+(codebase|project|application|app|system)\b/i,
+      /\ball\s+(files|modules|components)\b/i,
+      /\bmultiple\s+files\b/i,
+      /\bacross\s+(the\s+)?(codebase|project|files|modules)\b/i,
+      /\bsystem[\s-]wide\b/i,
+      /\bmigrat(e|ion)\b/i,
+      /\bfull[\s-]stack\b/i,
+      /\bend[\s-]to[\s-]end\b/i,
+      /\boverhaul\b/i,
+      /\bcomprehensive\b/i,
+      /\bextensive\b/i,
+      /\bimplement\s+(a\s+)?(new\s+)?system\b/i,
+      /\bbuild\s+(a\s+)?(complete|full|new)\b/i
+    ];
+    HEAVY_MODE_KEYWORDS = /* @__PURE__ */ new Set([
+      "ralph",
+      "autopilot",
+      "team",
+      "ralplan"
+    ]);
+  }
+});
+
+// src/hooks/keyword-detector/index.ts
+function isRetiredWorkflowSlashInvocation(text) {
+  return RETIRED_WORKFLOW_SLASH_PATTERN.test(text);
+}
+function parseExplicitWorkflowSlashInvocation(promptText) {
+  if (typeof promptText !== "string" || promptText.length === 0) return null;
+  const stripped = removeCodeBlocks2(promptText);
+  const match = WORKFLOW_SLASH_PATTERN.exec(stripped);
+  if (!match) return null;
+  const skill = match[1].toLowerCase();
+  const args = stripped.slice(match[0].length).trim();
+  return { skill, args, raw: match[0] };
+}
+function removeCodeBlocks2(text) {
+  let result = text.replace(/```[\s\S]*?```/g, "");
+  result = result.replace(/~~~[\s\S]*?~~~/g, "");
+  result = result.replace(/`[^`]+`/g, "");
+  return result;
+}
+function stripPastedCommandPayloads(text) {
+  const lines = text.split("\n");
+  const sanitized = [];
+  let insideRoleBlock = false;
+  let insideDiffBlock = false;
+  let insideMagicKeywordBlock = false;
+  let magicBlockSawUserRequest = false;
+  let magicBlockSawRequestPayload = false;
+  let previousLineWasUserRequest = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (insideMagicKeywordBlock) {
+      if (ROLE_BOUNDARY_PATTERN.test(trimmed)) {
+        insideRoleBlock = !/^<\s*\//.test(trimmed);
+        insideMagicKeywordBlock = false;
+        magicBlockSawUserRequest = false;
+        magicBlockSawRequestPayload = false;
+        continue;
+      }
+      if (USER_REQUEST_LINE_PATTERN.test(line)) {
+        magicBlockSawUserRequest = true;
+        magicBlockSawRequestPayload = false;
+        continue;
+      }
+      if (magicBlockSawUserRequest) {
+        if (trimmed) {
+          magicBlockSawRequestPayload = true;
+          continue;
+        }
+        if (magicBlockSawRequestPayload) {
+          insideMagicKeywordBlock = false;
+          magicBlockSawUserRequest = false;
+          magicBlockSawRequestPayload = false;
+          sanitized.push(line);
+          continue;
+        }
+      }
+      continue;
+    }
+    if (PASTED_MAGIC_KEYWORD_HEADER_PATTERN.test(line)) {
+      insideMagicKeywordBlock = true;
+      magicBlockSawUserRequest = false;
+      magicBlockSawRequestPayload = false;
+      continue;
+    }
+    if (ROLE_BOUNDARY_PATTERN.test(trimmed)) {
+      insideRoleBlock = !/^<\s*\//.test(trimmed);
+      continue;
+    }
+    if (insideRoleBlock) {
+      continue;
+    }
+    if (!trimmed) {
+      sanitized.push(line);
+      insideDiffBlock = false;
+      previousLineWasUserRequest = false;
+      continue;
+    }
+    if (previousLineWasUserRequest) {
+      previousLineWasUserRequest = false;
+      continue;
+    }
+    if (USER_REQUEST_LINE_PATTERN.test(line) || SKILL_TRANSCRIPT_LINE_PATTERN.test(line)) {
+      previousLineWasUserRequest = USER_REQUEST_LINE_PATTERN.test(line);
+      continue;
+    }
+    if (SHELL_TRANSCRIPT_LINE_PATTERN.test(line) && !/^\s*\$\w/.test(line)) {
+      continue;
+    }
+    if (insideDiffBlock) {
+      if (GIT_DIFF_CONTINUATION_PATTERNS.some((pattern) => pattern.test(trimmed))) {
+        continue;
+      }
+      insideDiffBlock = false;
+    }
+    if (GIT_DIFF_START_PATTERNS.some((pattern) => pattern.test(trimmed))) {
+      insideDiffBlock = true;
+      continue;
+    }
+    sanitized.push(line);
+  }
+  return sanitized.join("\n");
+}
+function sanitizeForKeywordDetection(text) {
+  let result = stripPastedCommandPayloads(text);
+  result = result.replace(/<!--[\s\S]*?-->/g, "");
+  result = result.replace(/<(\w[\w-]*)[\s>][\s\S]*?<\/\1>/g, "");
+  result = result.replace(/<\w[\w-]*(?:\s[^>]*)?\s*\/>/g, "");
+  result = result.replace(/https?:\/\/\S+/g, "");
+  result = result.replace(/^\s*>\s.*$/gm, "");
+  result = result.replace(/^\s*\|(?:[^|\n]*\|){2,}\s*$/gm, "");
+  result = result.replace(/^\s*\|?(?:\s*:?-{3,}:?\s*\|){1,}\s*$/gm, "");
+  result = result.replace(FILE_PATH_PATTERN, "$1");
+  result = removeCodeBlocks2(result);
+  return result;
+}
+function escapeRegExp2(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function getLineBounds(text, position) {
+  const start = text.lastIndexOf("\n", Math.max(0, position - 1)) + 1;
+  const nextNewline = text.indexOf("\n", position);
+  const end = nextNewline === -1 ? text.length : nextNewline;
+  return { start, end };
+}
+function isWithinQuotedSpan(text, position) {
+  for (const match of text.matchAll(QUOTED_SPAN_PATTERN)) {
+    if (match.index === void 0) continue;
+    const start = match.index;
+    const end = start + match[0].length;
+    if (position >= start && position < end) {
+      return true;
+    }
+  }
+  return false;
+}
+function findQuotedSpanBounds(text, position) {
+  for (const match of text.matchAll(QUOTED_SPAN_PATTERN)) {
+    if (match.index === void 0) continue;
+    const start = match.index;
+    const end = start + match[0].length;
+    if (position >= start && position < end) {
+      return { start, end };
+    }
+  }
+  return null;
+}
+function stripQuotedSpans(text) {
+  return text.replace(QUOTED_SPAN_PATTERN, " ");
+}
+function countDistinctModeReferences(text) {
+  const matches = text.match(MODE_REFERENCE_PATTERN) ?? [];
+  const normalized = new Set(
+    matches.map((match) => match.toLowerCase().replace(/\s+/g, "").replace(/-/g, ""))
+  );
+  return normalized.size;
+}
+function looksLikeReferenceContent(text) {
+  const hasReferenceMeta = REFERENCE_META_PATTERNS.some((pattern) => pattern.test(text));
+  const hasExplanationShape = REFERENCE_EXPLANATION_PATTERNS.some((pattern) => pattern.test(text));
+  const hasAnyModeMention = countDistinctModeReferences(text) >= 1;
+  const hasMultipleModeMentions = countDistinctModeReferences(text) >= 2;
+  const hasQuestionOutsideQuotes = QUESTION_FOLLOWUP_PATTERNS.some(
+    (pattern) => pattern.test(stripQuotedSpans(text))
+  );
+  return hasReferenceMeta && (hasExplanationShape || hasAnyModeMention || hasQuestionOutsideQuotes) || hasExplanationShape && (hasMultipleModeMentions || hasQuestionOutsideQuotes) || hasMultipleModeMentions && hasQuestionOutsideQuotes;
+}
+function hasActivationIntentNearKeyword(context, keyword) {
+  const escaped = escapeRegExp2(keyword.trim());
+  if (!escaped) return false;
+  const helpQuestionPatterns = [
+    new RegExp(`\\bhow\\s+do\\s+i\\s+use\\b[^\\n]{0,40}\\b${escaped}\\b`, "i"),
+    new RegExp(`\\bwhat(?:'s|\\s+is)\\b[^\\n]{0,40}\\b${escaped}\\b[^\\n]{0,40}\\bhow\\s+to\\s+use\\b`, "i")
+  ];
+  if (helpQuestionPatterns.some((pattern) => pattern.test(context))) {
+    return false;
+  }
+  const patterns = [
+    new RegExp(`\\b(?:use|run|start|enable|activate|invoke|trigger|launch)\\b[^\\n]{0,28}\\b${escaped}\\b`, "i"),
+    new RegExp(`\\b(?:fix|debug|investigate|resolve|handle|patch|address)\\b[^\\n]{0,28}\\b(?:issue|bug|problem|error)\\b[^\\n]{0,12}\\b(?:with|in)\\s+\\b${escaped}\\b`, "i")
+  ];
+  return patterns.some((pattern) => pattern.test(context));
+}
+function hasDirectInvocationPrefix(text, position) {
+  const prefix = text.slice(0, position);
+  return /^\s*(?:[$/!]\s*|force:\s*|oh-my-(?:claudecode|codex):\s*)?$/i.test(prefix);
+}
+function hasConversationalInvocationNearKeyword(text, position, _keywordLength, _keywordText) {
+  if (isWithinQuotedSpan(text, position)) {
+    return false;
+  }
+  const start = Math.max(0, position - INFORMATIONAL_CONTEXT_WINDOW2);
+  const prefix = stripQuotedSpans(text.slice(start, position));
+  const conversationalInvocationPatterns = [
+    /\bplease\s+$/i,
+    /\blet['’]?s\s+$/i,
+    /\bi\s+(?:want|need|would\s+like)\s+(?:a|an)\s+$/i,
+    /\b(?:can|could|would|will)\s+you\s+$/i
+  ];
+  return conversationalInvocationPatterns.some((pattern) => pattern.test(prefix));
+}
+function hasExplicitInvocationContext(text, position, keywordLength, keywordText) {
+  if (hasDirectInvocationPrefix(text, position)) {
+    return true;
+  }
+  const start = Math.max(0, position - INFORMATIONAL_CONTEXT_WINDOW2);
+  const end = Math.min(text.length, position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW2);
+  const context = text.slice(start, end);
+  if (hasActivationIntentNearKeyword(context, keywordText)) {
+    return true;
+  }
+  return hasConversationalInvocationNearKeyword(text, position, keywordLength, keywordText);
+}
+function hasDiagnosticIntentNearKeyword(context, keyword) {
+  const escaped = escapeRegExp2(keyword.trim());
+  if (!escaped) return false;
+  const patterns = [
+    new RegExp(`\\b${escaped}\\b[^\\n]{0,48}\\b(?:keeps?\\s+(?:looping|re-?running)|has\\s+(?:a\\s+)?(?:bug|issue|problem|error)|is\\s+(?:stuck|broken|failing)|loop(?:ing)?)\\b`, "i"),
+    new RegExp(`\\b(?:bug|issue|problem|error)\\b[^\\n]{0,16}\\b(?:with|in)\\s+\\b${escaped}\\b`, "i"),
+    new RegExp(`${escaped}.{0,14}(?:\uC790\uAFB8|\uACC4\uC18D).{0,14}(?:\uC7AC\uC2E4\uD589|\uBC18\uBCF5|\uB8E8\uD504|\uBA48\uCD94)`, "u"),
+    // Japanese: repeated-failure complaint — direct mirror of the Korean 자꾸/계속 line above
+    // (frequency adverb + problem verb). No P2 subject-particle pattern / no work-request escape: Korean parity.
+    new RegExp(`${escaped}[^\\n]{0,16}(?:\u307E\u305F|\u4F55\u5EA6\u3082|\u305A\u3063\u3068|\u983B\u7E41|\u7E70\u308A\u8FD4|\u3044\u3064\u3082)[^\\n]{0,16}(?:\u5931\u6557|\u30A8\u30E9\u30FC|\u30EB\u30FC\u30D7|\u6B62\u307E|\u843D\u3061|\u518D\u5B9F\u884C|\u52D5\u304B\u306A|\u30D5\u30EA\u30FC\u30BA|\u58CA\u308C|\u30AF\u30E9\u30C3\u30B7\u30E5|\u3053\u3051|\u66B4\u8D70|\u7121\u9650)`, "u")
+  ];
+  return patterns.some((pattern) => pattern.test(context));
+}
+function isRalphMetaOrBanterContext(context, keywordText) {
+  const normalizedKeyword = keywordText.toLowerCase().replace(/\s+/g, "");
+  if (!["ralph", "\uB784\uD504", "\u30E9\u30EB\u30D5"].includes(normalizedKeyword)) {
+    return false;
+  }
+  const currentKeywordPattern = ["ralph", "\uB784\uD504", "\u30E9\u30EB\u30D5"].join("|");
+  const imperativeVerbPattern = "\uCF1C|\uCF1C\uC918|\uC2E4\uD589|\uC2DC\uC791|\uB3CC\uB824|\uB3CC\uB824\uC918|\uC368|\uC368\uC918|\uC0AC\uC6A9\uD574|\uC9C4\uD589\uD574";
+  const koreanImperativePatterns = [
+    new RegExp(`(?:${currentKeywordPattern})[^?\uFF1F
+]{0,16}(?:${imperativeVerbPattern})`, "u"),
+    new RegExp(`(?:${imperativeVerbPattern})[^?\uFF1F
+]{0,16}(?:${currentKeywordPattern})`, "u")
+  ];
+  if (koreanImperativePatterns.some((pattern) => pattern.test(context))) {
+    return false;
+  }
+  const metaOrBanterPatterns = [
+    /[?？].{0,12}(?:ㅋ{1,}|ㅎ{1,}|lol|lmao)/iu,
+    /(?:ㅋ{1,}|ㅎ{1,}|lol|lmao).{0,40}[?？]/iu,
+    /(?:ralph|랄프|ラルフ).{0,40}(?:라도|줘야\s*해|쥐어\s*줘야\s*해|해야\s*해).{0,20}[?？]/iu,
+    /(?:관계|관련|연관|차이|비교).{0,40}(?:뭐|무엇|어떻게|설명|알려|궁금|인가|야|냐|니|까|[?？])/u,
+    /(?:뭐|무엇|어떻게|설명|알려|궁금).{0,40}(?:관계|관련|연관|차이|비교)/u
+  ];
+  return metaOrBanterPatterns.some((pattern) => pattern.test(context));
+}
+function isAutopilotCreationAlias(keywordText) {
+  const normalized = keywordText.toLowerCase().trim();
+  return /^(?:build|create|make)\s+me\b/.test(normalized) || /^i\s+want\s+an?(?:\s+(?:app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension))?\s*$/.test(normalized);
+}
+function hasActionableCommandAfterSeparator(text, position, keywordLength) {
+  const suffix = text.slice(position + keywordLength).match(/^\s*[:：]\s*([^\n]{0,80})/u)?.[1] ?? "";
+  if (/\?|？|\b(?:what(?:'s|\s+is)|how\s+(?:to|do\s+i)\s+use|explain|describe|tell\s+me\s+about)\b/iu.test(suffix)) {
+    return false;
+  }
+  return /\b(?:fix|debug|investigate|resolve|handle|patch|address|implement|build|create|make|run|start|enable|activate|invoke|trigger|launch)\b|(?:ทำ|ทํา|สร้าง|แก้|เปิด|รัน|เรียก|เริ่ม)/iu.test(suffix);
+}
+function isInformationalKeywordContext2(text, position, keywordLength, keywordText) {
+  const start = Math.max(0, position - INFORMATIONAL_CONTEXT_WINDOW2);
+  const end = Math.min(text.length, position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW2);
+  const context = text.slice(start, end);
+  const hasInformationalIntent = INFORMATIONAL_INTENT_PATTERNS2.some((pattern) => pattern.test(context));
+  const hasStrongHelpQueryIntent = /\?|？|\b(?:how\s+(?:to|do\s+i)\s+use|what(?:'s|\s+is)|explain|describe|tell\s+me\s+about)\b|(?:사용법|使い方|什么是|怎么用|如何使用)/iu.test(context);
+  const lineBounds = getLineBounds(text, position);
+  const line = text.slice(lineBounds.start, lineBounds.end);
+  const questionOutsideQuotes = stripQuotedSpans(text);
+  const keywordInsideQuotes = isWithinQuotedSpan(text, position);
+  const hasExecutionDirective = /\b(?:fix|debug|investigate|resolve|handle|patch|address|implement|build)\b/i.test(context);
+  const hasCommandSeparatorInvocation = hasDirectInvocationPrefix(text, position) && /^\s*[:：]/.test(text.slice(position + keywordLength));
+  const hasActionableCommandSeparatorInvocation = hasCommandSeparatorInvocation && hasActionableCommandAfterSeparator(text, position, keywordLength);
+  if (keywordInsideQuotes) {
+    const span = findQuotedSpanBounds(text, position);
+    const hasGenuineCommandNearQuote = span ? /\b(?:fix|debug|investigate|resolve|handle|patch|address|implement|build|use|run|start|enable|activate|invoke|trigger|launch)\b/i.test(
+      text.slice(Math.max(0, span.start - 28), span.start) + " " + text.slice(span.end, Math.min(text.length, span.end + 28))
+    ) : hasExecutionDirective;
+    if (!hasGenuineCommandNearQuote) {
+      return true;
+    }
+  }
+  if (keywordText) {
+    const hasActivationIntent = hasActivationIntentNearKeyword(context, keywordText);
+    if (hasActionableCommandSeparatorInvocation) {
+      return false;
+    }
+    if (isAutopilotCreationAlias(keywordText)) {
+      return false;
+    }
+    if (hasActivationIntent && hasExecutionDirective) {
+      return false;
+    }
+    if (hasInformationalIntent && hasStrongHelpQueryIntent) {
+      return true;
+    }
+    if (hasActivationIntent) {
+      return false;
+    }
+    if (hasConversationalInvocationNearKeyword(text, position, keywordLength, keywordText)) {
+      return false;
+    }
+    if (isRalphMetaOrBanterContext(context, keywordText)) {
+      return true;
+    }
+    if (hasDiagnosticIntentNearKeyword(context, keywordText)) {
+      return true;
+    }
+  }
+  if (/^\s*>\s/.test(line) || /^\s*\|(?:[^|\n]*\|){2,}\s*$/.test(line)) {
+    return true;
+  }
+  if (keywordInsideQuotes && QUESTION_FOLLOWUP_PATTERNS.some((pattern) => pattern.test(questionOutsideQuotes))) {
+    return true;
+  }
+  if (looksLikeReferenceContent(text)) {
+    return true;
+  }
+  return hasInformationalIntent;
+}
+function findActionableKeywordMatch(text, pattern) {
+  const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+  const globalPattern = new RegExp(pattern.source, flags);
+  for (const match of text.matchAll(globalPattern)) {
+    if (match.index === void 0) {
+      continue;
+    }
+    const keyword = match[0];
+    if (isInformationalKeywordContext2(text, match.index, keyword.length, keyword)) {
+      continue;
+    }
+    return {
+      keyword,
+      position: match.index
+    };
+  }
+  return null;
+}
+function findActionableRalplanMatch(text, pattern) {
+  const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+  const globalPattern = new RegExp(pattern.source, flags);
+  for (const match of text.matchAll(globalPattern)) {
+    if (match.index === void 0) {
+      continue;
+    }
+    const keyword = match[0];
+    if (isInformationalKeywordContext2(text, match.index, keyword.length, keyword)) {
+      continue;
+    }
+    if (!hasExplicitInvocationContext(text, match.index, keyword.length, keyword)) {
+      continue;
+    }
+    return {
+      keyword,
+      position: match.index
+    };
+  }
+  return null;
+}
+function detectKeywordsWithType(text, _agentName) {
+  const detected = [];
+  if (isRetiredWorkflowSlashInvocation(text)) {
+    return detected;
+  }
+  const explicitSlash = parseExplicitWorkflowSlashInvocation(text);
+  const explicitSlashType = explicitSlash ? SLASH_SKILL_TO_KEYWORD_TYPE[explicitSlash.skill] : void 0;
+  if (explicitSlash && explicitSlashType) {
+    const position = Math.max(0, text.indexOf(explicitSlash.raw.trim()));
+    detected.push({
+      type: explicitSlashType,
+      keyword: explicitSlash.raw.trim(),
+      position
+    });
+  }
+  const cleanedText = sanitizeForKeywordDetection(text);
+  for (const type of KEYWORD_PRIORITY) {
+    if (type === "team") {
+      continue;
+    }
+    if (explicitSlashType && type === explicitSlashType) {
+      continue;
+    }
+    const pattern = KEYWORD_PATTERNS[type];
+    const skipPredicate = KEYWORD_SKIP_PREDICATES[type];
+    if (skipPredicate && skipPredicate(cleanedText)) {
+      continue;
+    }
+    const match = type === "ralplan" ? findActionableRalplanMatch(cleanedText, pattern) : findActionableKeywordMatch(cleanedText, pattern);
+    if (match) {
+      detected.push({
+        ...match,
+        type
+      });
+    }
+  }
+  return detected;
+}
+function getAllKeywords(text) {
+  const detected = detectKeywordsWithType(text);
+  if (detected.length === 0) return [];
+  let types = [...new Set(detected.map((d) => d.type))];
+  if (types.includes("cancel")) return ["cancel"];
+  if (types.includes("team") && types.includes("autopilot")) {
+    types = types.filter((t) => t !== "autopilot");
+  }
+  return KEYWORD_PRIORITY.filter((k) => types.includes(k));
+}
+function getAllKeywordsWithSizeCheck(text, options = {}) {
+  const {
+    enabled = true,
+    smallWordLimit = 50,
+    largeWordLimit = 200,
+    suppressHeavyModesForSmallTasks = true
+  } = options;
+  const keywords = getAllKeywords(text);
+  if (!enabled || !suppressHeavyModesForSmallTasks || keywords.length === 0) {
+    return { keywords, taskSizeResult: null, suppressedKeywords: [] };
+  }
+  const thresholds = { smallWordLimit, largeWordLimit };
+  const taskSizeResult = classifyTaskSize(text, thresholds);
+  if (taskSizeResult.size !== "small") {
+    return { keywords, taskSizeResult, suppressedKeywords: [] };
+  }
+  const suppressedKeywords = [];
+  const filteredKeywords = keywords.filter((keyword) => {
+    if (isHeavyMode(keyword)) {
+      suppressedKeywords.push(keyword);
+      return false;
+    }
+    return true;
+  });
+  return {
+    keywords: filteredKeywords,
+    taskSizeResult,
+    suppressedKeywords
+  };
+}
+function isUnderspecifiedForExecution(text) {
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+  for (const prefix of GATE_BYPASS_PREFIXES) {
+    if (trimmed.startsWith(prefix)) return false;
+  }
+  if (WELL_SPECIFIED_SIGNALS.some((p) => p.test(trimmed))) return false;
+  const stripped = trimmed.replace(/\b(?:ralph|autopilot|team)\b/gi, "").trim();
+  const effectiveWords = stripped.split(/\s+/).filter((w) => w.length > 0).length;
+  if (effectiveWords <= 15) return true;
+  return false;
+}
+function applyRalplanGate(keywords, text) {
+  if (keywords.length === 0) {
+    return { keywords, gateApplied: false, gatedKeywords: [] };
+  }
+  if (keywords.includes("cancel")) {
+    return { keywords, gateApplied: false, gatedKeywords: [] };
+  }
+  if (keywords.includes("ralplan")) {
+    return { keywords, gateApplied: false, gatedKeywords: [] };
+  }
+  const executionKeywords = keywords.filter((k) => EXECUTION_GATE_KEYWORDS.has(k));
+  if (executionKeywords.length === 0) {
+    return { keywords, gateApplied: false, gatedKeywords: [] };
+  }
+  if (!isUnderspecifiedForExecution(text)) {
+    return { keywords, gateApplied: false, gatedKeywords: [] };
+  }
+  const filtered = keywords.filter((k) => !EXECUTION_GATE_KEYWORDS.has(k));
+  if (!filtered.includes("ralplan")) {
+    filtered.push("ralplan");
+  }
+  return { keywords: filtered, gateApplied: true, gatedKeywords: executionKeywords };
+}
+var KEYWORD_PATTERNS, OUROBOROS_BRAND_AT_START, KEYWORD_SKIP_PREDICATES, KEYWORD_PRIORITY, RETIRED_WORKFLOW_SLASH_PATTERN, CANONICAL_WORKFLOW_SLASH_SKILLS, SLASH_SKILL_TO_KEYWORD_TYPE, WORKFLOW_SLASH_PATTERN, PASTED_MAGIC_KEYWORD_HEADER_PATTERN, ROLE_BOUNDARY_PATTERN, SKILL_TRANSCRIPT_LINE_PATTERN, USER_REQUEST_LINE_PATTERN, SHELL_TRANSCRIPT_LINE_PATTERN, GIT_DIFF_START_PATTERNS, GIT_DIFF_CONTINUATION_PATTERNS, NON_LATIN_SCRIPT_PATTERN, PATH_SEGMENT_CHARS, FILE_PATH_PATTERN, INFORMATIONAL_INTENT_PATTERNS2, INFORMATIONAL_CONTEXT_WINDOW2, QUOTED_SPAN_PATTERN, REFERENCE_META_PATTERNS, REFERENCE_EXPLANATION_PATTERNS, QUESTION_FOLLOWUP_PATTERNS, MODE_REFERENCE_PATTERN, EXECUTION_GATE_KEYWORDS, GATE_BYPASS_PREFIXES, WELL_SPECIFIED_SIGNALS;
+var init_keyword_detector = __esm({
+  "src/hooks/keyword-detector/index.ts"() {
+    "use strict";
+    init_task_size_detector();
+    KEYWORD_PATTERNS = {
+      cancel: /\b(cancelomc|stopomc)\b/i,
+      ralph: /\b(ralph)\b(?!-)|(랄프)(?!로렌)|(ラルフ)(?!・?ローレン)/i,
+      autopilot: /\b(autopilot|auto[\s-]?pilot|fullsend|full\s+auto)\b|\b(?:build|create|make)\s+me\s+(?:an?\s+)?(?:app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b|\bi\s+want\s+an?\s+(?:app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b|(오토파일럿)|(オートパイロット)/i,
+      // Team keyword detection disabled — team mode is now explicit-only via /team skill.
+      // This prevents infinite spawning when Claude workers receive prompts containing "team".
+      team: /(?!x)x/,
+      // never-match placeholder (type system requires the key)
+      ralplan: /\b(ralplan)\b|(랄플랜)|(ラルプラン)/i,
+      tdd: /\b(tdd)\b|\btest\s+first\b|(테스트\s?퍼스트)|(テスト\s?ファースト)/i,
+      "code-review": /\b(code\s+review|review\s+code)\b|(코드\s?리뷰)(?!어)|(コード\s?レビュー)(?!ア)/i,
+      "security-review": /\b(security\s+review|review\s+security)\b|(보안\s?리뷰)(?!어)|(セキュリティ[ー]?\s?レビュー)(?!ア)/i,
+      ultrathink: /\b(ultrathink)\b|(울트라씽크)|(ウルトラシンク)/i,
+      deepsearch: /\b(deepsearch)\b|\bsearch\s+the\s+codebase\b|\bfind\s+in\s+(the\s+)?codebase\b|(딥\s?서치)|(ディープ\s?サーチ)/i,
+      analyze: /\b(deep[\s-]?analyze|deepanalyze)\b|(딥\s?분석)|(ディープ\s?アナライズ)/i,
+      "deep-interview": /\b(deep[\s-]interview|ouroboros)\b|(딥인터뷰)|(ディープインタビュー)/i,
+      codex: /\b(ask|use|delegate\s+to)\s+(codex|gpt)\b/i,
+      gemini: /\b(ask|use|delegate\s+to)\s+gemini\b/i,
+      cursor: /\b(ask|use|delegate\s+to)\s+cursor\b/i,
+      antigravity: /\b(ask|use|delegate\s+to)\s+(antigravity|agy)\b/i
+    };
+    OUROBOROS_BRAND_AT_START = /^\s*\/?(?:ouroboros|ooo)\b/i;
+    KEYWORD_SKIP_PREDICATES = {
+      "deep-interview": (text) => OUROBOROS_BRAND_AT_START.test(text)
+    };
+    KEYWORD_PRIORITY = [
+      "cancel",
+      "ralph",
+      "autopilot",
+      "team",
+      "ralplan",
+      "tdd",
+      "code-review",
+      "security-review",
+      "ultrathink",
+      "deepsearch",
+      "analyze",
+      "deep-interview",
+      "codex",
+      "gemini",
+      "cursor",
+      "antigravity"
+    ];
+    RETIRED_WORKFLOW_SLASH_PATTERN = /^\s*\/(?:oh-my-claudecode:|omc:)?(?:ultrawork|ulw|uw|울트라워크|ウルトラワーク|ccg|claude-codex-gemini|씨씨지|シーシージー)(?=\s|$|[?!.,;:])/i;
+    CANONICAL_WORKFLOW_SLASH_SKILLS = [
+      "autopilot",
+      "ralph",
+      "team",
+      "ultraqa",
+      "deep-interview",
+      "ralplan",
+      "self-improve"
+    ];
+    SLASH_SKILL_TO_KEYWORD_TYPE = {
+      autopilot: "autopilot",
+      ralph: "ralph",
+      team: "team",
+      "deep-interview": "deep-interview",
+      ralplan: "ralplan"
+    };
+    WORKFLOW_SLASH_PATTERN = new RegExp(
+      "^\\s*/(?:oh-my-claudecode:|omc:)?(" + CANONICAL_WORKFLOW_SLASH_SKILLS.map((skill) => skill.replace(/-/g, "\\-")).join("|") + ")(?=\\s|$|[?!.,;:])",
+      "i"
+    );
+    PASTED_MAGIC_KEYWORD_HEADER_PATTERN = /^\s*\[MAGIC KEYWORDS?(?: DETECTED)?:.*$/i;
+    ROLE_BOUNDARY_PATTERN = /^<\s*\/?\s*(system|human|assistant|user|tool_use|tool_result)\b[^>]*>/i;
+    SKILL_TRANSCRIPT_LINE_PATTERN = /^\s*Skill:\s+oh-my-(?:claudecode|codex):/i;
+    USER_REQUEST_LINE_PATTERN = /^\s*User request(?:\s*\([^)]*\))?:\s*$/i;
+    SHELL_TRANSCRIPT_LINE_PATTERN = /^\s*[$%❯]\s+/;
+    GIT_DIFF_START_PATTERNS = [
+      /^diff\s+--git\s+a\//,
+      /^index\s+[0-9a-f]+\.\.[0-9a-f]+(?:\s+\d+)?$/i,
+      /^(?:---|\+\+\+)\s+[ab]\//,
+      /^@@\s+-\d+/
+    ];
+    GIT_DIFF_CONTINUATION_PATTERNS = [
+      /^new file mode\s+\d+$/i,
+      /^deleted file mode\s+\d+$/i,
+      /^similarity index\s+\d+%$/i,
+      /^rename (?:from|to)\s+/i,
+      /^Binary files .+ differ$/i,
+      /^(?:diff\s+--git\s+a\/|index\s+[0-9a-f]+\.\.[0-9a-f]+|(?:---|\+\+\+)\s+[ab]\/|@@\s+-\d+)/i,
+      /^[ +\-].*/
+    ];
+    NON_LATIN_SCRIPT_PATTERN = // eslint-disable-next-line no-misleading-character-class -- Intentional: detecting script presence, not matching grapheme clusters
+    /[\u3000-\u9FFF\uAC00-\uD7AF\u0400-\u04FF\u0600-\u06FF\u0900-\u097F\u0E00-\u0E7F\u1000-\u109F]/u;
+    PATH_SEGMENT_CHARS = "[\\w.\\-\\u3000-\\u9FFF\\uAC00-\\uD7AF\\u0400-\\u04FF\\u0600-\\u06FF\\u0900-\\u097F\\u0E00-\\u0E7F\\u1000-\\u109F]";
+    FILE_PATH_PATTERN = new RegExp(
+      "(^|[\\s\"'`(])(?:\\/)?(?:" + PATH_SEGMENT_CHARS + "+\\/)+(?:" + PATH_SEGMENT_CHARS + "*\\.\\w+|[\\w.\\-]+)",
+      "gm"
+    );
+    INFORMATIONAL_INTENT_PATTERNS2 = [
+      /\b(?:what(?:'s|\s+is)|what\s+are|how\s+(?:to|do\s+i)\s+use|explain|explanation|tell\s+me\s+about|describe)\b/i,
+      /(?:뭐야|뭔데|무엇(?:이야|인가요)?|어떻게|설명(?!서\s*(?:작성|만들|생성|추가|업데이트|수정|편집|쓰))|사용법|알려\s?줘|알려줄래|소개해?\s?줘|소개\s*부탁|설명해\s?줘|뭐가\s*달라|어떤\s*기능|기능\s*(?:알려|설명|뭐)|방법\s*(?:알려|설명|뭐))/u,
+      /(?:とは|って何|使い方|説明|(?:について|に関して|違い)[^\n]{0,24}(?:教えて|説明|知りたい)|(?:どう|何が|どこが)違う)/u,
+      /(?:什么是|怎(?:么|樣)用|如何使用|解释|說明|说明)/u,
+      /(?:ทำไม|อะไร|ยังไง|อย่างไร|คืออะไร|หมายถึง|แปลว่า|อธิบาย|มั้ย|ไหม|เหรอ|หรอ|หรือไม่|หรือเปล่า|ใช่ไหม|ถูกมั้ย|เกี่ยวกับ|เหมือน)/u
+    ];
+    INFORMATIONAL_CONTEXT_WINDOW2 = 80;
+    QUOTED_SPAN_PATTERN = /"[^"\n]{1,400}"|'[^'\n]{1,400}'|“[^”\n]{1,400}”|‘[^’\n]{1,400}’/g;
+    REFERENCE_META_PATTERNS = [
+      /\b(?:vs\.?|versus|compared\s+to|comparison|compare|article|blog\s+post|documentation|docs?|reference)\b/i,
+      /(?:비교|차이|설명|정리|문서|자료|가이드|이\s*(?:글|비교|문서)는|블로그)/u,
+      /\b(?:this\s+(?:article|comparison|guide|documentation|doc)|quoted|quote(?:d)?)\b/i,
+      /(?:เปรียบเทียบ|ต่างกัน|ความต่าง|เอกสาร|บทความ|ไกด์|คู่มือ|เกี่ยวกับ|เหมือน)/u
+    ];
+    REFERENCE_EXPLANATION_PATTERNS = [
+      /(?:^|\n)\s*(?:결론|특징|예시|요약|장점|단점|설명)\s*[:：]/u,
+      /\b(?:summary|conclusion|key\s+points?|example|examples|pros|cons|overview)\s*:/i,
+      /[^\n]{1,80}=\s*["“]/,
+      /[→⇒]/
+    ];
+    QUESTION_FOLLOWUP_PATTERNS = [
+      /\b(?:how\s+many|how\s+much|why|what\s+happened|what\s+went\s+wrong|token\s+budget|cost|pricing)\b/i,
+      /(?:왜|얼마|몇\s*번|몇번|토큰|가격|비용|질문)/u,
+      /(?:ทำไม|อะไร|ยังไง|อย่างไร|เท่าไหร่|กี่|มั้ย|ไหม|เหรอ|หรอ|หรือไม่|หรือเปล่า|ใช่ไหม|ถูกมั้ย)/u
+    ];
+    MODE_REFERENCE_PATTERN = /\b(?:ralph|autopilot|auto[\s-]?pilot|ralplan|ultrathink|deepsearch|deep[\s-]?analyze|deepanalyze|deep[\s-]interview|ouroboros|deerflow)\b/gi;
+    EXECUTION_GATE_KEYWORDS = /* @__PURE__ */ new Set([
+      "ralph",
+      "autopilot",
+      "team"
+    ]);
+    GATE_BYPASS_PREFIXES = ["force:", "!"];
+    WELL_SPECIFIED_SIGNALS = [
+      // References specific files by extension
+      /\b[\w/.-]+\.(?:ts|js|py|go|rs|java|tsx|jsx|vue|svelte|rb|c|cpp|h|css|scss|html|json|yaml|yml|toml)\b/,
+      // References specific paths with directory separators
+      /(?:src|lib|test|spec|app|pages|components|hooks|utils|services|api|dist|build|scripts)\/\w+/,
+      // References specific functions/classes/methods by keyword
+      /\b(?:function|class|method|interface|type|const|let|var|def|fn|struct|enum)\s+\w{2,}/i,
+      // CamelCase identifiers (likely symbol names: processKeyword, getUserById)
+      /\b[a-z]+(?:[A-Z][a-z]+)+\b/,
+      // PascalCase identifiers (likely class/type names: KeywordDetector, UserModel)
+      /\b[A-Z][a-z]+(?:[A-Z][a-z0-9]*)+\b/,
+      // snake_case identifiers with 2+ segments (likely symbol names: user_model, get_user)
+      /\b[a-z]+(?:_[a-z]+)+\b/,
+      // Bare issue/PR number (#123, #42)
+      /(?:^|\s)#\d+\b/,
+      // Has numbered steps or bullet list (structured request)
+      /(?:^|\n)\s*(?:\d+[.)]\s|-\s+\S|\*\s+\S)/m,
+      // Has acceptance criteria or test spec keywords
+      /\b(?:acceptance\s+criteria|test\s+(?:spec|plan|case)|should\s+(?:return|throw|render|display|create|delete|update))\b/i,
+      // Has specific error or issue reference
+      /\b(?:error:|bug\s*#?\d+|issue\s*#\d+|stack\s*trace|exception|TypeError|ReferenceError|SyntaxError)\b/i,
+      // Has a code block with substantial content.
+      // NOTE: In the bridge.ts integration, cleanedText has code blocks pre-stripped by
+      // removeCodeBlocks(), so this regex will not match there. It remains useful for
+      // direct callers of isUnderspecifiedForExecution() that pass raw prompt text.
+      /```[\s\S]{20,}?```/,
+      // PR or commit reference
+      /\b(?:PR\s*#\d+|commit\s+[0-9a-f]{7}|pull\s+request)\b/i,
+      // "in <specific-path>" pattern
+      /\bin\s+[\w/.-]+\.(?:ts|js|py|go|rs|java|tsx|jsx)\b/,
+      // Test runner commands (explicit test target)
+      /\b(?:npm\s+test|npx\s+(?:vitest|jest)|pytest|cargo\s+test|go\s+test|make\s+test)\b/i
+    ];
+  }
+});
+
 // src/hooks/todo-continuation/index.ts
 var todo_continuation_exports = {};
 __export(todo_continuation_exports, {
@@ -48471,6 +49257,189 @@ var init_resolver2 = __esm({
   }
 });
 
+// src/hooks/jev/points.ts
+function skillTriggerCriteria() {
+  const priority = Array.isArray(KEYWORD_PRIORITY) ? KEYWORD_PRIORITY : [];
+  return {
+    ...Object.fromEntries(
+      priority.filter((type) => type !== "team").slice(0, 12).map((type) => [type, `The prompt explicitly invokes the ${type} trigger.`])
+    ),
+    none: "No trigger fires; handle the prompt without a mode or skill."
+  };
+}
+function skillTriggerQuestions() {
+  return {
+    "skill-trigger": {
+      type: "Choice",
+      instructions: "Which skill or mode should this user prompt trigger?",
+      criteria: skillTriggerCriteria()
+    }
+  };
+}
+function defineJudgmentPoint(definition) {
+  return {
+    name: definition.name,
+    questions: Array.isArray(definition.questions) ? definition.questions : [definition.questions],
+    blocking: definition.blocking
+  };
+}
+function getJudgmentPoint(name) {
+  const point = JUDGMENT_POINTS[name];
+  if (!point) throw new Error("[jev] unknown judgment point: " + name);
+  return point;
+}
+function recordJudgment(pointName, call) {
+  const point = getJudgmentPoint(pointName);
+  const questionSet = call.questionSet ?? 0;
+  const questions = point.questions[questionSet];
+  if (!questions) {
+    throw new Error("[jev] " + pointName + ": question set #" + questionSet + " is not declared");
+  }
+  return resolveJudgment({
+    point: point.name,
+    state: call.state,
+    questions: typeof questions === "function" ? questions() : questions,
+    twin: call.twin,
+    blocking: point.blocking,
+    fetchFn: call.fetchFn
+  });
+}
+var INTENT_QUESTIONS, NOUL_QUESTIONS, SCORE_QUESTIONS, MODEL_ROUTING_QUESTIONS, STALENESS_QUESTIONS, VERDICT_QUESTIONS, TASK_SIZE_QUESTIONS, LEARNER_EXTRACTION_QUESTIONS, SLOP_WARNING_QUESTIONS, SIMPLIFIER_TRIGGER_QUESTIONS, JUDGMENT_POINTS;
+var init_points = __esm({
+  "src/hooks/jev/points.ts"() {
+    "use strict";
+    init_keyword_detector();
+    init_resolver2();
+    INTENT_QUESTIONS = {
+      intent: {
+        type: "Noul",
+        instructions: "Does this user prompt start an Intent-intake request (a non-engineer contributor stating a problem/goal/constraints to start the requirements intake flow)?",
+        criteria: {
+          true: "The prompt states a problem, goal, or constraints from a contributor and starts the Intent intake \u2014 a goal-level intent.md with problem/goal/users-and-systems/constraints/open-questions, not a solution design.",
+          false: "Everything else: solution or engineering work, informational questions, or an existing workflow. Not an Intent-intake request."
+        }
+      }
+    };
+    NOUL_QUESTIONS = {
+      task_complete: {
+        type: "Noul",
+        instructions: "Is the task complete \u2014 is there no substantive work left for this mode?",
+        criteria: {}
+      }
+    };
+    SCORE_QUESTIONS = {
+      iteration_progress: {
+        type: "Score",
+        instructions: "How much substantive progress did the current iteration make?",
+        criteria: {
+          no_progress: "No progress",
+          minor_progress: "Minor progress",
+          moderate_progress: "Moderate progress",
+          substantial_progress: "Substantial progress"
+        }
+      }
+    };
+    MODEL_ROUTING_QUESTIONS = {
+      "model-tier": {
+        type: "Choice",
+        instructions: "Which model tier should this delegated task use?",
+        criteria: {
+          haiku: "Quick lookups and lightweight, mechanical work",
+          sonnet: "Standard coding and orchestration work",
+          opus: "Complex architecture and deep analysis"
+        }
+      }
+    };
+    STALENESS_QUESTIONS = {
+      staleness: {
+        type: "Score",
+        instructions: "How stale is this context candidate?",
+        criteria: {
+          fresh: "Fresh \u2014 keep",
+          recent: "Recent",
+          aging: "Aging",
+          stale: "Stale \u2014 prune candidate"
+        }
+      }
+    };
+    VERDICT_QUESTIONS = {
+      completion_criteria_met: {
+        type: "Noul",
+        instructions: "Does the completion claim satisfy the PRD acceptance criteria for this mode?",
+        criteria: {
+          true: "All acceptance criteria are demonstrably satisfied by the evidence",
+          false: "At least one criterion is unmet or evidence is missing"
+        }
+      }
+    };
+    TASK_SIZE_QUESTIONS = {
+      "task-size": {
+        type: "Choice",
+        instructions: "What size is this task \u2014 how much orchestration does it warrant?",
+        criteria: {
+          small: "Single-file or few-line change; run directly without heavy modes",
+          medium: "Multi-file but single-area change; standard delegation",
+          large: "Multi-area or architectural change; heavy orchestration (ralph/autopilot/team) is warranted"
+        }
+      }
+    };
+    LEARNER_EXTRACTION_QUESTIONS = {
+      extractable_moment: {
+        type: "Noul",
+        instructions: "Does this assistant message contain an extractable memory-worthy moment?",
+        criteria: {
+          true: "Contains a reusable pattern, decision, or correction worth persisting",
+          false: "Routine work with nothing worth extracting"
+        }
+      }
+    };
+    SLOP_WARNING_QUESTIONS = {
+      slop_advisory: {
+        type: "Noul",
+        instructions: "Does this tool input contain fallback/workaround language worth an advisory warning?",
+        criteria: {
+          true: "Contains fallback/workaround phrasing outside doc or self-referential context",
+          false: "No advisory-worthy language"
+        }
+      }
+    };
+    SIMPLIFIER_TRIGGER_QUESTIONS = {
+      simplification_worthy: {
+        type: "Noul",
+        instructions: "Is this change simplification-worthy enough to inject the simplifier delegation?",
+        criteria: {
+          true: "The change would benefit from a simplification pass (duplication, speculative flexibility, over-abstraction)",
+          false: "Change is already minimal or not code"
+        }
+      }
+    };
+    JUDGMENT_POINTS = {
+      intent: defineJudgmentPoint({ name: "intent", questions: INTENT_QUESTIONS, blocking: false }),
+      "loop-continuation": defineJudgmentPoint({
+        name: "loop-continuation",
+        questions: [NOUL_QUESTIONS, SCORE_QUESTIONS],
+        blocking: true
+      }),
+      "skill-trigger": defineJudgmentPoint({ name: "skill-trigger", questions: skillTriggerQuestions, blocking: false }),
+      "model-routing": defineJudgmentPoint({ name: "model-routing", questions: MODEL_ROUTING_QUESTIONS, blocking: false }),
+      "context-pruning": defineJudgmentPoint({ name: "context-pruning", questions: STALENESS_QUESTIONS, blocking: false }),
+      "ralph-verdict": defineJudgmentPoint({ name: "ralph-verdict", questions: VERDICT_QUESTIONS, blocking: true }),
+      "task-size": defineJudgmentPoint({ name: "task-size", questions: TASK_SIZE_QUESTIONS, blocking: false }),
+      "learner-extraction": defineJudgmentPoint({
+        name: "learner-extraction",
+        questions: LEARNER_EXTRACTION_QUESTIONS,
+        blocking: false
+      }),
+      "slop-warning": defineJudgmentPoint({ name: "slop-warning", questions: SLOP_WARNING_QUESTIONS, blocking: false }),
+      "simplifier-trigger": defineJudgmentPoint({
+        name: "simplifier-trigger",
+        questions: SIMPLIFIER_TRIGGER_QUESTIONS,
+        blocking: false
+      })
+    };
+  }
+});
+
 // src/hooks/jev/index.ts
 var init_jev = __esm({
   "src/hooks/jev/index.ts"() {
@@ -48479,6 +49448,7 @@ var init_jev = __esm({
     init_config();
     init_client();
     init_resolver2();
+    init_points();
   }
 });
 
@@ -52814,36 +53784,22 @@ var init_cancel = __esm({
 // src/hooks/ralph/jev-shadow.ts
 async function applyRalphVerdictShadow(args) {
   const { verdict } = args;
-  await resolveJudgment({
-    point: "ralph-verdict",
+  await recordJudgment("ralph-verdict", {
     state: {
       verdict,
       prd_criteria: args.prdContext,
       claim: args.claim,
       critic_mode: args.criticMode ?? null
     },
-    questions: VERDICT_QUESTIONS,
     twin: () => verdict,
-    blocking: true,
     fetchFn: args.fetchFn
   });
   return verdict;
 }
-var VERDICT_QUESTIONS;
 var init_jev_shadow = __esm({
   "src/hooks/ralph/jev-shadow.ts"() {
     "use strict";
     init_jev();
-    VERDICT_QUESTIONS = {
-      completion_criteria_met: {
-        type: "Noul",
-        instructions: "Does the completion claim satisfy the PRD acceptance criteria for this mode?",
-        criteria: {
-          true: "All acceptance criteria are demonstrably satisfied by the evidence",
-          false: "At least one criterion is unmet or evidence is missing"
-        }
-      }
-    };
   }
 });
 
@@ -52864,49 +53820,24 @@ async function applyLoopContinuationShadow(args) {
   if (result.mode === "none") return result;
   const state = buildLoopContinuationState(result, args.sessionId);
   await Promise.all([
-    resolveJudgment({
-      point: "loop-continuation",
+    recordJudgment("loop-continuation", {
       state,
-      questions: NOUL_QUESTIONS,
       twin: () => result,
-      blocking: true,
       fetchFn: args.fetchFn
     }),
-    resolveJudgment({
-      point: "loop-continuation",
+    recordJudgment("loop-continuation", {
       state,
-      questions: SCORE_QUESTIONS,
       twin: () => result,
-      blocking: true,
+      questionSet: 1,
       fetchFn: args.fetchFn
     })
   ]);
   return result;
 }
-var NOUL_QUESTIONS, SCORE_QUESTIONS;
 var init_jev_shadow2 = __esm({
   "src/hooks/persistent-mode/jev-shadow.ts"() {
     "use strict";
     init_jev();
-    NOUL_QUESTIONS = {
-      task_complete: {
-        type: "Noul",
-        instructions: "Is the task complete \u2014 is there no substantive work left for this mode?",
-        criteria: {}
-      }
-    };
-    SCORE_QUESTIONS = {
-      iteration_progress: {
-        type: "Score",
-        instructions: "How much substantive progress did the current iteration make?",
-        criteria: {
-          no_progress: "No progress",
-          minor_progress: "Minor progress",
-          moderate_progress: "Moderate progress",
-          substantial_progress: "Substantial progress"
-        }
-      }
-    };
   }
 });
 
@@ -56207,15 +57138,19 @@ function reapStaleSessionEndOwner(directory, sessionId, expectedNonce, expectedG
     }
     job.owner = null;
     job.phase = "recoverable-failure";
+    job.recoverableFailure = { reason: `owner-reaped-${liveness}`, releasedAt: nowIso(), ownerNonce: expectedNonce };
   });
 }
-function releaseSessionEndJob(directory, sessionId, nonce, generation) {
+function releaseSessionEndJob(directory, sessionId, nonce, generation, reason = "worker-released") {
   const current = readSessionEndJob(directory, sessionId);
   if (!current) return null;
   return mutateSessionEndJob(directory, sessionId, current.revision, (job) => {
     if (!job.owner || job.owner.nonce !== nonce || job.owner.leaseGeneration !== generation) throw new Error("release-conflict");
     job.owner = null;
-    if (job.phase !== "complete") job.phase = "recoverable-failure";
+    if (job.phase !== "complete") {
+      job.phase = "recoverable-failure";
+      job.recoverableFailure = { reason, releasedAt: nowIso(), ownerNonce: nonce };
+    }
   });
 }
 function updateSessionEndJob(directory, sessionId, expectedOwner, mutate) {
@@ -82143,20 +83078,33 @@ async function processSessionEndWorker(payload) {
   }
   let producerReady = Boolean(admitted && ["sealed", "no-op"].includes(admitted.producers.core.state) && ["sealed", "no-op"].includes(admitted.producers.wiki.state));
   let generation = claimed.owner.leaseGeneration;
+  let exitReason = "actions-settled";
   try {
     for (const name of Object.keys(claimed.actions)) {
-      if (Date.now() >= deadlineAt) break;
+      if (Date.now() >= deadlineAt) {
+        exitReason = "run-deadline-reached";
+        break;
+      }
       const before = readSessionEndJob(payload.directory, payload.sessionId);
-      if (!before || before.owner?.nonce !== nonce) break;
+      if (!before || before.owner?.nonce !== nonce) {
+        exitReason = before ? "ownership-lost" : "manifest-unreadable";
+        break;
+      }
       if (!producerReady && (name !== "foreground-cleanup" || !graceExpired || before.producers.core.state !== "prepared")) continue;
       if (name === "wiki-capture" && before.producers.wiki.state === "absent") continue;
       const owned = claimSessionEndAction(payload.directory, payload.sessionId, nonce, name, deadlineAt);
       const action = owned?.actions[name];
       if (!owned || !action || action.status !== "claimed" || !action.runner) continue;
       const renewed = renewSessionEndLease(payload.directory, payload.sessionId, nonce, generation, deadlineAt);
-      if (!renewed?.owner) break;
+      if (!renewed?.owner) {
+        exitReason = "lease-renew-failed-before-action";
+        break;
+      }
       generation = renewed.owner.leaseGeneration;
-      if (!markSessionEndActionRunner(payload.directory, payload.sessionId, nonce, name, action.runner.runnerNonce, "started")) break;
+      if (!markSessionEndActionRunner(payload.directory, payload.sessionId, nonce, name, action.runner.runnerNonce, "started")) {
+        exitReason = `runner-start-rejected-${name}`;
+        break;
+      }
       const stopWatchdog = armSessionEndActionWatchdog({ directory: payload.directory, jobId: owned.jobId, action: name, attempt: action.attempts, runnerNonce: action.runner.runnerNonce, deadlineAt: Math.min(deadlineAt, Date.now() + action.budgetMs) });
       const actionDeadline = Math.min(deadlineAt, Date.now() + action.budgetMs);
       let leaseLost = false;
@@ -82170,7 +83118,10 @@ async function processSessionEndWorker(payload) {
       const result = await runSessionEndAction({ directory: payload.directory, sessionId: payload.sessionId, job: owned, actionName: name, action, ownerNonce: nonce, runnerNonce: action.runner.runnerNonce, deadlineAt: actionDeadline }, () => executeSessionEndAction(name, payload, actionDeadline, authority));
       clearInterval(heartbeatTimer);
       stopWatchdog();
-      if (leaseLost) break;
+      if (leaseLost) {
+        exitReason = `lease-lost-during-${name}`;
+        break;
+      }
       finishSessionEndAction(payload.directory, payload.sessionId, nonce, name, action.runner.runnerNonce, result.completed, result.code);
       if (name === "foreground-cleanup" && result.completed) {
         recoverPreparedCoreProducer(payload.directory, payload.sessionId);
@@ -82178,11 +83129,14 @@ async function processSessionEndWorker(payload) {
         producerReady = Boolean(recovered && ["sealed", "no-op"].includes(recovered.producers.core.state) && ["sealed", "no-op"].includes(recovered.producers.wiki.state));
       }
       const heartbeat = renewSessionEndLease(payload.directory, payload.sessionId, nonce, generation, deadlineAt);
-      if (!heartbeat?.owner) break;
+      if (!heartbeat?.owner) {
+        exitReason = `lease-renew-failed-after-${name}`;
+        break;
+      }
       generation = heartbeat.owner.leaseGeneration;
     }
   } finally {
-    const released = releaseSessionEndJob(payload.directory, payload.sessionId, nonce, generation);
+    const released = releaseSessionEndJob(payload.directory, payload.sessionId, nonce, generation, exitReason);
     const terminalized = failClosedExhaustedForegroundCleanup(payload.directory, payload.sessionId);
     reschedulePendingWorker(payload, terminalized ?? released ?? readSessionEndJob(payload.directory, payload.sessionId));
   }
@@ -83496,6 +84450,31 @@ var init_setup = __esm({
   }
 });
 
+// src/hooks/code-simplifier/jev-shadow.ts
+function computeSimplifierTriggerTwin(stateDir, files) {
+  if (!isCodeSimplifierEnabled()) return false;
+  if (isAlreadyTriggered(stateDir)) return false;
+  return files.length > 0;
+}
+function recordSimplifierTriggerShadow(args) {
+  return recordJudgment("simplifier-trigger", {
+    state: {
+      cwd: args.cwd,
+      files: args.files,
+      source: "code-simplifier-stop"
+    },
+    twin: () => computeSimplifierTriggerTwin(args.stateDir, args.files),
+    fetchFn: args.fetchFn
+  });
+}
+var init_jev_shadow3 = __esm({
+  "src/hooks/code-simplifier/jev-shadow.ts"() {
+    "use strict";
+    init_code_simplifier();
+    init_jev();
+  }
+});
+
 // src/hooks/code-simplifier/index.ts
 var code_simplifier_exports = {};
 __export(code_simplifier_exports, {
@@ -83585,6 +84564,13 @@ function processCodeSimplifier(cwd2, stateDir) {
   if (files.length === 0) {
     return { shouldBlock: false, message: "" };
   }
+  void recordSimplifierTriggerShadow({
+    cwd: cwd2,
+    stateDir,
+    files,
+    shouldBlock: true
+  }).catch(() => {
+  });
   writeTriggerMarker(stateDir);
   return {
     shouldBlock: true,
@@ -83599,6 +84585,7 @@ var init_code_simplifier = __esm({
     import_path113 = require("path");
     import_child_process30 = require("child_process");
     init_paths();
+    init_jev_shadow3();
     DEFAULT_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs"];
     DEFAULT_MAX_FILES = 10;
     TRIGGER_MARKER_FILENAME = "code-simplifier-triggered.marker";
@@ -112404,776 +113391,8 @@ function resolveBriefArg(briefArg) {
   return { text, source: "file" };
 }
 
-// src/hooks/task-size-detector/index.ts
-var DEFAULT_THRESHOLDS = {
-  smallWordLimit: 50,
-  largeWordLimit: 200
-};
-var ESCAPE_HATCH_PREFIXES = [
-  "quick:",
-  "simple:",
-  "tiny:",
-  "minor:",
-  "small:",
-  "just:",
-  "only:"
-];
-var SMALL_TASK_SIGNALS = [
-  /\btypo\b/i,
-  /\bspelling\b/i,
-  /\brename\s+\w+\s+to\b/i,
-  /\bone[\s-]liner?\b/i,
-  /\bone[\s-]line\s+fix\b/i,
-  /\bsingle\s+file\b/i,
-  /\bin\s+this\s+file\b/i,
-  /\bthis\s+function\b/i,
-  /\bthis\s+line\b/i,
-  /\bminor\s+(fix|change|update|tweak)\b/i,
-  /\bfix\s+(a\s+)?typo\b/i,
-  /\badd\s+a?\s*comment\b/i,
-  /\bwhitespace\b/i,
-  /\bindentation\b/i,
-  /\bformat(ting)?\s+(this|the)\b/i,
-  /\bquick\s+fix\b/i,
-  /\bsmall\s+(fix|change|tweak|update)\b/i,
-  /\bupdate\s+(the\s+)?version\b/i,
-  /\bbump\s+version\b/i
-];
-var LARGE_TASK_SIGNALS = [
-  /\barchitect(ure|ural)?\b/i,
-  /\brefactor\b/i,
-  /\bredesign\b/i,
-  /\bfrom\s+scratch\b/i,
-  /\bcross[\s-]cutting\b/i,
-  /\bentire\s+(codebase|project|application|app|system)\b/i,
-  /\ball\s+(files|modules|components)\b/i,
-  /\bmultiple\s+files\b/i,
-  /\bacross\s+(the\s+)?(codebase|project|files|modules)\b/i,
-  /\bsystem[\s-]wide\b/i,
-  /\bmigrat(e|ion)\b/i,
-  /\bfull[\s-]stack\b/i,
-  /\bend[\s-]to[\s-]end\b/i,
-  /\boverhaul\b/i,
-  /\bcomprehensive\b/i,
-  /\bextensive\b/i,
-  /\bimplement\s+(a\s+)?(new\s+)?system\b/i,
-  /\bbuild\s+(a\s+)?(complete|full|new)\b/i
-];
-function countWords(text) {
-  return text.trim().split(/\s+/).filter(Boolean).length;
-}
-function detectEscapeHatch(text) {
-  const trimmed = text.trim().toLowerCase();
-  for (const prefix of ESCAPE_HATCH_PREFIXES) {
-    if (trimmed.startsWith(prefix)) {
-      return prefix;
-    }
-  }
-  return null;
-}
-function hasSmallTaskSignals(text) {
-  return SMALL_TASK_SIGNALS.some((pattern) => pattern.test(text));
-}
-function hasLargeTaskSignals(text) {
-  return LARGE_TASK_SIGNALS.some((pattern) => pattern.test(text));
-}
-function classifyTaskSize(text, thresholds = DEFAULT_THRESHOLDS) {
-  const wordCount = countWords(text);
-  const escapePrefix = detectEscapeHatch(text);
-  if (escapePrefix !== null) {
-    return {
-      size: "small",
-      reason: `Escape hatch prefix detected: "${escapePrefix}"`,
-      wordCount,
-      hasEscapeHatch: true,
-      escapePrefixUsed: escapePrefix
-    };
-  }
-  const hasLarge = hasLargeTaskSignals(text);
-  const hasSmall = hasSmallTaskSignals(text);
-  if (hasLarge) {
-    return {
-      size: "large",
-      reason: "Large task signals detected (architecture/refactor/cross-cutting scope)",
-      wordCount,
-      hasEscapeHatch: false
-    };
-  }
-  if (wordCount > thresholds.largeWordLimit) {
-    return {
-      size: "large",
-      reason: `Prompt length (${wordCount} words) exceeds large task threshold (${thresholds.largeWordLimit})`,
-      wordCount,
-      hasEscapeHatch: false
-    };
-  }
-  if (hasSmall && !hasLarge) {
-    return {
-      size: "small",
-      reason: "Small task signals detected (single file / minor change)",
-      wordCount,
-      hasEscapeHatch: false
-    };
-  }
-  if (wordCount <= thresholds.smallWordLimit) {
-    return {
-      size: "small",
-      reason: `Prompt length (${wordCount} words) is within small task threshold (${thresholds.smallWordLimit})`,
-      wordCount,
-      hasEscapeHatch: false
-    };
-  }
-  return {
-    size: "medium",
-    reason: `Prompt length (${wordCount} words) is in medium range`,
-    wordCount,
-    hasEscapeHatch: false
-  };
-}
-var HEAVY_MODE_KEYWORDS = /* @__PURE__ */ new Set([
-  "ralph",
-  "autopilot",
-  "team",
-  "ralplan"
-]);
-function isHeavyMode(keywordType) {
-  return HEAVY_MODE_KEYWORDS.has(keywordType);
-}
-
-// src/hooks/keyword-detector/index.ts
-var KEYWORD_PATTERNS = {
-  cancel: /\b(cancelomc|stopomc)\b/i,
-  ralph: /\b(ralph)\b(?!-)|(랄프)(?!로렌)|(ラルフ)(?!・?ローレン)/i,
-  autopilot: /\b(autopilot|auto[\s-]?pilot|fullsend|full\s+auto)\b|\b(?:build|create|make)\s+me\s+(?:an?\s+)?(?:app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b|\bi\s+want\s+an?\s+(?:app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension)\b|(오토파일럿)|(オートパイロット)/i,
-  // Team keyword detection disabled — team mode is now explicit-only via /team skill.
-  // This prevents infinite spawning when Claude workers receive prompts containing "team".
-  team: /(?!x)x/,
-  // never-match placeholder (type system requires the key)
-  ralplan: /\b(ralplan)\b|(랄플랜)|(ラルプラン)/i,
-  tdd: /\b(tdd)\b|\btest\s+first\b|(테스트\s?퍼스트)|(テスト\s?ファースト)/i,
-  "code-review": /\b(code\s+review|review\s+code)\b|(코드\s?리뷰)(?!어)|(コード\s?レビュー)(?!ア)/i,
-  "security-review": /\b(security\s+review|review\s+security)\b|(보안\s?리뷰)(?!어)|(セキュリティ[ー]?\s?レビュー)(?!ア)/i,
-  ultrathink: /\b(ultrathink)\b|(울트라씽크)|(ウルトラシンク)/i,
-  deepsearch: /\b(deepsearch)\b|\bsearch\s+the\s+codebase\b|\bfind\s+in\s+(the\s+)?codebase\b|(딥\s?서치)|(ディープ\s?サーチ)/i,
-  analyze: /\b(deep[\s-]?analyze|deepanalyze)\b|(딥\s?분석)|(ディープ\s?アナライズ)/i,
-  "deep-interview": /\b(deep[\s-]interview|ouroboros)\b|(딥인터뷰)|(ディープインタビュー)/i,
-  codex: /\b(ask|use|delegate\s+to)\s+(codex|gpt)\b/i,
-  gemini: /\b(ask|use|delegate\s+to)\s+gemini\b/i,
-  cursor: /\b(ask|use|delegate\s+to)\s+cursor\b/i,
-  antigravity: /\b(ask|use|delegate\s+to)\s+(antigravity|agy)\b/i
-};
-var OUROBOROS_BRAND_AT_START = /^\s*\/?(?:ouroboros|ooo)\b/i;
-var KEYWORD_SKIP_PREDICATES = {
-  "deep-interview": (text) => OUROBOROS_BRAND_AT_START.test(text)
-};
-var KEYWORD_PRIORITY = [
-  "cancel",
-  "ralph",
-  "autopilot",
-  "team",
-  "ralplan",
-  "tdd",
-  "code-review",
-  "security-review",
-  "ultrathink",
-  "deepsearch",
-  "analyze",
-  "deep-interview",
-  "codex",
-  "gemini",
-  "cursor",
-  "antigravity"
-];
-var RETIRED_WORKFLOW_SLASH_PATTERN = /^\s*\/(?:oh-my-claudecode:|omc:)?(?:ultrawork|ulw|uw|울트라워크|ウルトラワーク|ccg|claude-codex-gemini|씨씨지|シーシージー)(?=\s|$|[?!.,;:])/i;
-function isRetiredWorkflowSlashInvocation(text) {
-  return RETIRED_WORKFLOW_SLASH_PATTERN.test(text);
-}
-var CANONICAL_WORKFLOW_SLASH_SKILLS = [
-  "autopilot",
-  "ralph",
-  "team",
-  "ultraqa",
-  "deep-interview",
-  "ralplan",
-  "self-improve"
-];
-var SLASH_SKILL_TO_KEYWORD_TYPE = {
-  autopilot: "autopilot",
-  ralph: "ralph",
-  team: "team",
-  "deep-interview": "deep-interview",
-  ralplan: "ralplan"
-};
-var WORKFLOW_SLASH_PATTERN = new RegExp(
-  "^\\s*/(?:oh-my-claudecode:|omc:)?(" + CANONICAL_WORKFLOW_SLASH_SKILLS.map((skill) => skill.replace(/-/g, "\\-")).join("|") + ")(?=\\s|$|[?!.,;:])",
-  "i"
-);
-function parseExplicitWorkflowSlashInvocation(promptText) {
-  if (typeof promptText !== "string" || promptText.length === 0) return null;
-  const stripped = removeCodeBlocks2(promptText);
-  const match = WORKFLOW_SLASH_PATTERN.exec(stripped);
-  if (!match) return null;
-  const skill = match[1].toLowerCase();
-  const args = stripped.slice(match[0].length).trim();
-  return { skill, args, raw: match[0] };
-}
-function removeCodeBlocks2(text) {
-  let result = text.replace(/```[\s\S]*?```/g, "");
-  result = result.replace(/~~~[\s\S]*?~~~/g, "");
-  result = result.replace(/`[^`]+`/g, "");
-  return result;
-}
-var PASTED_MAGIC_KEYWORD_HEADER_PATTERN = /^\s*\[MAGIC KEYWORDS?(?: DETECTED)?:.*$/i;
-var ROLE_BOUNDARY_PATTERN = /^<\s*\/?\s*(system|human|assistant|user|tool_use|tool_result)\b[^>]*>/i;
-var SKILL_TRANSCRIPT_LINE_PATTERN = /^\s*Skill:\s+oh-my-(?:claudecode|codex):/i;
-var USER_REQUEST_LINE_PATTERN = /^\s*User request(?:\s*\([^)]*\))?:\s*$/i;
-var SHELL_TRANSCRIPT_LINE_PATTERN = /^\s*[$%❯]\s+/;
-var GIT_DIFF_START_PATTERNS = [
-  /^diff\s+--git\s+a\//,
-  /^index\s+[0-9a-f]+\.\.[0-9a-f]+(?:\s+\d+)?$/i,
-  /^(?:---|\+\+\+)\s+[ab]\//,
-  /^@@\s+-\d+/
-];
-var GIT_DIFF_CONTINUATION_PATTERNS = [
-  /^new file mode\s+\d+$/i,
-  /^deleted file mode\s+\d+$/i,
-  /^similarity index\s+\d+%$/i,
-  /^rename (?:from|to)\s+/i,
-  /^Binary files .+ differ$/i,
-  /^(?:diff\s+--git\s+a\/|index\s+[0-9a-f]+\.\.[0-9a-f]+|(?:---|\+\+\+)\s+[ab]\/|@@\s+-\d+)/i,
-  /^[ +\-].*/
-];
-function stripPastedCommandPayloads(text) {
-  const lines = text.split("\n");
-  const sanitized = [];
-  let insideRoleBlock = false;
-  let insideDiffBlock = false;
-  let insideMagicKeywordBlock = false;
-  let magicBlockSawUserRequest = false;
-  let magicBlockSawRequestPayload = false;
-  let previousLineWasUserRequest = false;
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (insideMagicKeywordBlock) {
-      if (ROLE_BOUNDARY_PATTERN.test(trimmed)) {
-        insideRoleBlock = !/^<\s*\//.test(trimmed);
-        insideMagicKeywordBlock = false;
-        magicBlockSawUserRequest = false;
-        magicBlockSawRequestPayload = false;
-        continue;
-      }
-      if (USER_REQUEST_LINE_PATTERN.test(line)) {
-        magicBlockSawUserRequest = true;
-        magicBlockSawRequestPayload = false;
-        continue;
-      }
-      if (magicBlockSawUserRequest) {
-        if (trimmed) {
-          magicBlockSawRequestPayload = true;
-          continue;
-        }
-        if (magicBlockSawRequestPayload) {
-          insideMagicKeywordBlock = false;
-          magicBlockSawUserRequest = false;
-          magicBlockSawRequestPayload = false;
-          sanitized.push(line);
-          continue;
-        }
-      }
-      continue;
-    }
-    if (PASTED_MAGIC_KEYWORD_HEADER_PATTERN.test(line)) {
-      insideMagicKeywordBlock = true;
-      magicBlockSawUserRequest = false;
-      magicBlockSawRequestPayload = false;
-      continue;
-    }
-    if (ROLE_BOUNDARY_PATTERN.test(trimmed)) {
-      insideRoleBlock = !/^<\s*\//.test(trimmed);
-      continue;
-    }
-    if (insideRoleBlock) {
-      continue;
-    }
-    if (!trimmed) {
-      sanitized.push(line);
-      insideDiffBlock = false;
-      previousLineWasUserRequest = false;
-      continue;
-    }
-    if (previousLineWasUserRequest) {
-      previousLineWasUserRequest = false;
-      continue;
-    }
-    if (USER_REQUEST_LINE_PATTERN.test(line) || SKILL_TRANSCRIPT_LINE_PATTERN.test(line)) {
-      previousLineWasUserRequest = USER_REQUEST_LINE_PATTERN.test(line);
-      continue;
-    }
-    if (SHELL_TRANSCRIPT_LINE_PATTERN.test(line) && !/^\s*\$\w/.test(line)) {
-      continue;
-    }
-    if (insideDiffBlock) {
-      if (GIT_DIFF_CONTINUATION_PATTERNS.some((pattern) => pattern.test(trimmed))) {
-        continue;
-      }
-      insideDiffBlock = false;
-    }
-    if (GIT_DIFF_START_PATTERNS.some((pattern) => pattern.test(trimmed))) {
-      insideDiffBlock = true;
-      continue;
-    }
-    sanitized.push(line);
-  }
-  return sanitized.join("\n");
-}
-var NON_LATIN_SCRIPT_PATTERN = (
-  // eslint-disable-next-line no-misleading-character-class -- Intentional: detecting script presence, not matching grapheme clusters
-  /[\u3000-\u9FFF\uAC00-\uD7AF\u0400-\u04FF\u0600-\u06FF\u0900-\u097F\u0E00-\u0E7F\u1000-\u109F]/u
-);
-var PATH_SEGMENT_CHARS = "[\\w.\\-\\u3000-\\u9FFF\\uAC00-\\uD7AF\\u0400-\\u04FF\\u0600-\\u06FF\\u0900-\\u097F\\u0E00-\\u0E7F\\u1000-\\u109F]";
-var FILE_PATH_PATTERN = new RegExp(
-  "(^|[\\s\"'`(])(?:\\/)?(?:" + PATH_SEGMENT_CHARS + "+\\/)+(?:" + PATH_SEGMENT_CHARS + "*\\.\\w+|[\\w.\\-]+)",
-  "gm"
-);
-function sanitizeForKeywordDetection(text) {
-  let result = stripPastedCommandPayloads(text);
-  result = result.replace(/<!--[\s\S]*?-->/g, "");
-  result = result.replace(/<(\w[\w-]*)[\s>][\s\S]*?<\/\1>/g, "");
-  result = result.replace(/<\w[\w-]*(?:\s[^>]*)?\s*\/>/g, "");
-  result = result.replace(/https?:\/\/\S+/g, "");
-  result = result.replace(/^\s*>\s.*$/gm, "");
-  result = result.replace(/^\s*\|(?:[^|\n]*\|){2,}\s*$/gm, "");
-  result = result.replace(/^\s*\|?(?:\s*:?-{3,}:?\s*\|){1,}\s*$/gm, "");
-  result = result.replace(FILE_PATH_PATTERN, "$1");
-  result = removeCodeBlocks2(result);
-  return result;
-}
-var INFORMATIONAL_INTENT_PATTERNS2 = [
-  /\b(?:what(?:'s|\s+is)|what\s+are|how\s+(?:to|do\s+i)\s+use|explain|explanation|tell\s+me\s+about|describe)\b/i,
-  /(?:뭐야|뭔데|무엇(?:이야|인가요)?|어떻게|설명(?!서\s*(?:작성|만들|생성|추가|업데이트|수정|편집|쓰))|사용법|알려\s?줘|알려줄래|소개해?\s?줘|소개\s*부탁|설명해\s?줘|뭐가\s*달라|어떤\s*기능|기능\s*(?:알려|설명|뭐)|방법\s*(?:알려|설명|뭐))/u,
-  /(?:とは|って何|使い方|説明|(?:について|に関して|違い)[^\n]{0,24}(?:教えて|説明|知りたい)|(?:どう|何が|どこが)違う)/u,
-  /(?:什么是|怎(?:么|樣)用|如何使用|解释|說明|说明)/u,
-  /(?:ทำไม|อะไร|ยังไง|อย่างไร|คืออะไร|หมายถึง|แปลว่า|อธิบาย|มั้ย|ไหม|เหรอ|หรอ|หรือไม่|หรือเปล่า|ใช่ไหม|ถูกมั้ย|เกี่ยวกับ|เหมือน)/u
-];
-var INFORMATIONAL_CONTEXT_WINDOW2 = 80;
-var QUOTED_SPAN_PATTERN = /"[^"\n]{1,400}"|'[^'\n]{1,400}'|“[^”\n]{1,400}”|‘[^’\n]{1,400}’/g;
-var REFERENCE_META_PATTERNS = [
-  /\b(?:vs\.?|versus|compared\s+to|comparison|compare|article|blog\s+post|documentation|docs?|reference)\b/i,
-  /(?:비교|차이|설명|정리|문서|자료|가이드|이\s*(?:글|비교|문서)는|블로그)/u,
-  /\b(?:this\s+(?:article|comparison|guide|documentation|doc)|quoted|quote(?:d)?)\b/i,
-  /(?:เปรียบเทียบ|ต่างกัน|ความต่าง|เอกสาร|บทความ|ไกด์|คู่มือ|เกี่ยวกับ|เหมือน)/u
-];
-var REFERENCE_EXPLANATION_PATTERNS = [
-  /(?:^|\n)\s*(?:결론|특징|예시|요약|장점|단점|설명)\s*[:：]/u,
-  /\b(?:summary|conclusion|key\s+points?|example|examples|pros|cons|overview)\s*:/i,
-  /[^\n]{1,80}=\s*["“]/,
-  /[→⇒]/
-];
-var QUESTION_FOLLOWUP_PATTERNS = [
-  /\b(?:how\s+many|how\s+much|why|what\s+happened|what\s+went\s+wrong|token\s+budget|cost|pricing)\b/i,
-  /(?:왜|얼마|몇\s*번|몇번|토큰|가격|비용|질문)/u,
-  /(?:ทำไม|อะไร|ยังไง|อย่างไร|เท่าไหร่|กี่|มั้ย|ไหม|เหรอ|หรอ|หรือไม่|หรือเปล่า|ใช่ไหม|ถูกมั้ย)/u
-];
-var MODE_REFERENCE_PATTERN = /\b(?:ralph|autopilot|auto[\s-]?pilot|ralplan|ultrathink|deepsearch|deep[\s-]?analyze|deepanalyze|deep[\s-]interview|ouroboros|deerflow)\b/gi;
-function escapeRegExp2(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-function getLineBounds(text, position) {
-  const start = text.lastIndexOf("\n", Math.max(0, position - 1)) + 1;
-  const nextNewline = text.indexOf("\n", position);
-  const end = nextNewline === -1 ? text.length : nextNewline;
-  return { start, end };
-}
-function isWithinQuotedSpan(text, position) {
-  for (const match of text.matchAll(QUOTED_SPAN_PATTERN)) {
-    if (match.index === void 0) continue;
-    const start = match.index;
-    const end = start + match[0].length;
-    if (position >= start && position < end) {
-      return true;
-    }
-  }
-  return false;
-}
-function findQuotedSpanBounds(text, position) {
-  for (const match of text.matchAll(QUOTED_SPAN_PATTERN)) {
-    if (match.index === void 0) continue;
-    const start = match.index;
-    const end = start + match[0].length;
-    if (position >= start && position < end) {
-      return { start, end };
-    }
-  }
-  return null;
-}
-function stripQuotedSpans(text) {
-  return text.replace(QUOTED_SPAN_PATTERN, " ");
-}
-function countDistinctModeReferences(text) {
-  const matches = text.match(MODE_REFERENCE_PATTERN) ?? [];
-  const normalized = new Set(
-    matches.map((match) => match.toLowerCase().replace(/\s+/g, "").replace(/-/g, ""))
-  );
-  return normalized.size;
-}
-function looksLikeReferenceContent(text) {
-  const hasReferenceMeta = REFERENCE_META_PATTERNS.some((pattern) => pattern.test(text));
-  const hasExplanationShape = REFERENCE_EXPLANATION_PATTERNS.some((pattern) => pattern.test(text));
-  const hasAnyModeMention = countDistinctModeReferences(text) >= 1;
-  const hasMultipleModeMentions = countDistinctModeReferences(text) >= 2;
-  const hasQuestionOutsideQuotes = QUESTION_FOLLOWUP_PATTERNS.some(
-    (pattern) => pattern.test(stripQuotedSpans(text))
-  );
-  return hasReferenceMeta && (hasExplanationShape || hasAnyModeMention || hasQuestionOutsideQuotes) || hasExplanationShape && (hasMultipleModeMentions || hasQuestionOutsideQuotes) || hasMultipleModeMentions && hasQuestionOutsideQuotes;
-}
-function hasActivationIntentNearKeyword(context, keyword) {
-  const escaped = escapeRegExp2(keyword.trim());
-  if (!escaped) return false;
-  const helpQuestionPatterns = [
-    new RegExp(`\\bhow\\s+do\\s+i\\s+use\\b[^\\n]{0,40}\\b${escaped}\\b`, "i"),
-    new RegExp(`\\bwhat(?:'s|\\s+is)\\b[^\\n]{0,40}\\b${escaped}\\b[^\\n]{0,40}\\bhow\\s+to\\s+use\\b`, "i")
-  ];
-  if (helpQuestionPatterns.some((pattern) => pattern.test(context))) {
-    return false;
-  }
-  const patterns = [
-    new RegExp(`\\b(?:use|run|start|enable|activate|invoke|trigger|launch)\\b[^\\n]{0,28}\\b${escaped}\\b`, "i"),
-    new RegExp(`\\b(?:fix|debug|investigate|resolve|handle|patch|address)\\b[^\\n]{0,28}\\b(?:issue|bug|problem|error)\\b[^\\n]{0,12}\\b(?:with|in)\\s+\\b${escaped}\\b`, "i")
-  ];
-  return patterns.some((pattern) => pattern.test(context));
-}
-function hasDirectInvocationPrefix(text, position) {
-  const prefix = text.slice(0, position);
-  return /^\s*(?:[$/!]\s*|force:\s*|oh-my-(?:claudecode|codex):\s*)?$/i.test(prefix);
-}
-function hasConversationalInvocationNearKeyword(text, position, _keywordLength, _keywordText) {
-  if (isWithinQuotedSpan(text, position)) {
-    return false;
-  }
-  const start = Math.max(0, position - INFORMATIONAL_CONTEXT_WINDOW2);
-  const prefix = stripQuotedSpans(text.slice(start, position));
-  const conversationalInvocationPatterns = [
-    /\bplease\s+$/i,
-    /\blet['’]?s\s+$/i,
-    /\bi\s+(?:want|need|would\s+like)\s+(?:a|an)\s+$/i,
-    /\b(?:can|could|would|will)\s+you\s+$/i
-  ];
-  return conversationalInvocationPatterns.some((pattern) => pattern.test(prefix));
-}
-function hasExplicitInvocationContext(text, position, keywordLength, keywordText) {
-  if (hasDirectInvocationPrefix(text, position)) {
-    return true;
-  }
-  const start = Math.max(0, position - INFORMATIONAL_CONTEXT_WINDOW2);
-  const end = Math.min(text.length, position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW2);
-  const context = text.slice(start, end);
-  if (hasActivationIntentNearKeyword(context, keywordText)) {
-    return true;
-  }
-  return hasConversationalInvocationNearKeyword(text, position, keywordLength, keywordText);
-}
-function hasDiagnosticIntentNearKeyword(context, keyword) {
-  const escaped = escapeRegExp2(keyword.trim());
-  if (!escaped) return false;
-  const patterns = [
-    new RegExp(`\\b${escaped}\\b[^\\n]{0,48}\\b(?:keeps?\\s+(?:looping|re-?running)|has\\s+(?:a\\s+)?(?:bug|issue|problem|error)|is\\s+(?:stuck|broken|failing)|loop(?:ing)?)\\b`, "i"),
-    new RegExp(`\\b(?:bug|issue|problem|error)\\b[^\\n]{0,16}\\b(?:with|in)\\s+\\b${escaped}\\b`, "i"),
-    new RegExp(`${escaped}.{0,14}(?:\uC790\uAFB8|\uACC4\uC18D).{0,14}(?:\uC7AC\uC2E4\uD589|\uBC18\uBCF5|\uB8E8\uD504|\uBA48\uCD94)`, "u"),
-    // Japanese: repeated-failure complaint — direct mirror of the Korean 자꾸/계속 line above
-    // (frequency adverb + problem verb). No P2 subject-particle pattern / no work-request escape: Korean parity.
-    new RegExp(`${escaped}[^\\n]{0,16}(?:\u307E\u305F|\u4F55\u5EA6\u3082|\u305A\u3063\u3068|\u983B\u7E41|\u7E70\u308A\u8FD4|\u3044\u3064\u3082)[^\\n]{0,16}(?:\u5931\u6557|\u30A8\u30E9\u30FC|\u30EB\u30FC\u30D7|\u6B62\u307E|\u843D\u3061|\u518D\u5B9F\u884C|\u52D5\u304B\u306A|\u30D5\u30EA\u30FC\u30BA|\u58CA\u308C|\u30AF\u30E9\u30C3\u30B7\u30E5|\u3053\u3051|\u66B4\u8D70|\u7121\u9650)`, "u")
-  ];
-  return patterns.some((pattern) => pattern.test(context));
-}
-function isRalphMetaOrBanterContext(context, keywordText) {
-  const normalizedKeyword = keywordText.toLowerCase().replace(/\s+/g, "");
-  if (!["ralph", "\uB784\uD504", "\u30E9\u30EB\u30D5"].includes(normalizedKeyword)) {
-    return false;
-  }
-  const currentKeywordPattern = ["ralph", "\uB784\uD504", "\u30E9\u30EB\u30D5"].join("|");
-  const imperativeVerbPattern = "\uCF1C|\uCF1C\uC918|\uC2E4\uD589|\uC2DC\uC791|\uB3CC\uB824|\uB3CC\uB824\uC918|\uC368|\uC368\uC918|\uC0AC\uC6A9\uD574|\uC9C4\uD589\uD574";
-  const koreanImperativePatterns = [
-    new RegExp(`(?:${currentKeywordPattern})[^?\uFF1F
-]{0,16}(?:${imperativeVerbPattern})`, "u"),
-    new RegExp(`(?:${imperativeVerbPattern})[^?\uFF1F
-]{0,16}(?:${currentKeywordPattern})`, "u")
-  ];
-  if (koreanImperativePatterns.some((pattern) => pattern.test(context))) {
-    return false;
-  }
-  const metaOrBanterPatterns = [
-    /[?？].{0,12}(?:ㅋ{1,}|ㅎ{1,}|lol|lmao)/iu,
-    /(?:ㅋ{1,}|ㅎ{1,}|lol|lmao).{0,40}[?？]/iu,
-    /(?:ralph|랄프|ラルフ).{0,40}(?:라도|줘야\s*해|쥐어\s*줘야\s*해|해야\s*해).{0,20}[?？]/iu,
-    /(?:관계|관련|연관|차이|비교).{0,40}(?:뭐|무엇|어떻게|설명|알려|궁금|인가|야|냐|니|까|[?？])/u,
-    /(?:뭐|무엇|어떻게|설명|알려|궁금).{0,40}(?:관계|관련|연관|차이|비교)/u
-  ];
-  return metaOrBanterPatterns.some((pattern) => pattern.test(context));
-}
-function isAutopilotCreationAlias(keywordText) {
-  const normalized = keywordText.toLowerCase().trim();
-  return /^(?:build|create|make)\s+me\b/.test(normalized) || /^i\s+want\s+an?(?:\s+(?:app|feature|project|tool|plugin|website|api|server|cli|script|system|service|dashboard|bot|extension))?\s*$/.test(normalized);
-}
-function hasActionableCommandAfterSeparator(text, position, keywordLength) {
-  const suffix = text.slice(position + keywordLength).match(/^\s*[:：]\s*([^\n]{0,80})/u)?.[1] ?? "";
-  if (/\?|？|\b(?:what(?:'s|\s+is)|how\s+(?:to|do\s+i)\s+use|explain|describe|tell\s+me\s+about)\b/iu.test(suffix)) {
-    return false;
-  }
-  return /\b(?:fix|debug|investigate|resolve|handle|patch|address|implement|build|create|make|run|start|enable|activate|invoke|trigger|launch)\b|(?:ทำ|ทํา|สร้าง|แก้|เปิด|รัน|เรียก|เริ่ม)/iu.test(suffix);
-}
-function isInformationalKeywordContext2(text, position, keywordLength, keywordText) {
-  const start = Math.max(0, position - INFORMATIONAL_CONTEXT_WINDOW2);
-  const end = Math.min(text.length, position + keywordLength + INFORMATIONAL_CONTEXT_WINDOW2);
-  const context = text.slice(start, end);
-  const hasInformationalIntent = INFORMATIONAL_INTENT_PATTERNS2.some((pattern) => pattern.test(context));
-  const hasStrongHelpQueryIntent = /\?|？|\b(?:how\s+(?:to|do\s+i)\s+use|what(?:'s|\s+is)|explain|describe|tell\s+me\s+about)\b|(?:사용법|使い方|什么是|怎么用|如何使用)/iu.test(context);
-  const lineBounds = getLineBounds(text, position);
-  const line = text.slice(lineBounds.start, lineBounds.end);
-  const questionOutsideQuotes = stripQuotedSpans(text);
-  const keywordInsideQuotes = isWithinQuotedSpan(text, position);
-  const hasExecutionDirective = /\b(?:fix|debug|investigate|resolve|handle|patch|address|implement|build)\b/i.test(context);
-  const hasCommandSeparatorInvocation = hasDirectInvocationPrefix(text, position) && /^\s*[:：]/.test(text.slice(position + keywordLength));
-  const hasActionableCommandSeparatorInvocation = hasCommandSeparatorInvocation && hasActionableCommandAfterSeparator(text, position, keywordLength);
-  if (keywordInsideQuotes) {
-    const span = findQuotedSpanBounds(text, position);
-    const hasGenuineCommandNearQuote = span ? /\b(?:fix|debug|investigate|resolve|handle|patch|address|implement|build|use|run|start|enable|activate|invoke|trigger|launch)\b/i.test(
-      text.slice(Math.max(0, span.start - 28), span.start) + " " + text.slice(span.end, Math.min(text.length, span.end + 28))
-    ) : hasExecutionDirective;
-    if (!hasGenuineCommandNearQuote) {
-      return true;
-    }
-  }
-  if (keywordText) {
-    const hasActivationIntent = hasActivationIntentNearKeyword(context, keywordText);
-    if (hasActionableCommandSeparatorInvocation) {
-      return false;
-    }
-    if (isAutopilotCreationAlias(keywordText)) {
-      return false;
-    }
-    if (hasActivationIntent && hasExecutionDirective) {
-      return false;
-    }
-    if (hasInformationalIntent && hasStrongHelpQueryIntent) {
-      return true;
-    }
-    if (hasActivationIntent) {
-      return false;
-    }
-    if (hasConversationalInvocationNearKeyword(text, position, keywordLength, keywordText)) {
-      return false;
-    }
-    if (isRalphMetaOrBanterContext(context, keywordText)) {
-      return true;
-    }
-    if (hasDiagnosticIntentNearKeyword(context, keywordText)) {
-      return true;
-    }
-  }
-  if (/^\s*>\s/.test(line) || /^\s*\|(?:[^|\n]*\|){2,}\s*$/.test(line)) {
-    return true;
-  }
-  if (keywordInsideQuotes && QUESTION_FOLLOWUP_PATTERNS.some((pattern) => pattern.test(questionOutsideQuotes))) {
-    return true;
-  }
-  if (looksLikeReferenceContent(text)) {
-    return true;
-  }
-  return hasInformationalIntent;
-}
-function findActionableKeywordMatch(text, pattern) {
-  const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
-  const globalPattern = new RegExp(pattern.source, flags);
-  for (const match of text.matchAll(globalPattern)) {
-    if (match.index === void 0) {
-      continue;
-    }
-    const keyword = match[0];
-    if (isInformationalKeywordContext2(text, match.index, keyword.length, keyword)) {
-      continue;
-    }
-    return {
-      keyword,
-      position: match.index
-    };
-  }
-  return null;
-}
-function findActionableRalplanMatch(text, pattern) {
-  const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
-  const globalPattern = new RegExp(pattern.source, flags);
-  for (const match of text.matchAll(globalPattern)) {
-    if (match.index === void 0) {
-      continue;
-    }
-    const keyword = match[0];
-    if (isInformationalKeywordContext2(text, match.index, keyword.length, keyword)) {
-      continue;
-    }
-    if (!hasExplicitInvocationContext(text, match.index, keyword.length, keyword)) {
-      continue;
-    }
-    return {
-      keyword,
-      position: match.index
-    };
-  }
-  return null;
-}
-function detectKeywordsWithType(text, _agentName) {
-  const detected = [];
-  if (isRetiredWorkflowSlashInvocation(text)) {
-    return detected;
-  }
-  const explicitSlash = parseExplicitWorkflowSlashInvocation(text);
-  const explicitSlashType = explicitSlash ? SLASH_SKILL_TO_KEYWORD_TYPE[explicitSlash.skill] : void 0;
-  if (explicitSlash && explicitSlashType) {
-    const position = Math.max(0, text.indexOf(explicitSlash.raw.trim()));
-    detected.push({
-      type: explicitSlashType,
-      keyword: explicitSlash.raw.trim(),
-      position
-    });
-  }
-  const cleanedText = sanitizeForKeywordDetection(text);
-  for (const type of KEYWORD_PRIORITY) {
-    if (type === "team") {
-      continue;
-    }
-    if (explicitSlashType && type === explicitSlashType) {
-      continue;
-    }
-    const pattern = KEYWORD_PATTERNS[type];
-    const skipPredicate = KEYWORD_SKIP_PREDICATES[type];
-    if (skipPredicate && skipPredicate(cleanedText)) {
-      continue;
-    }
-    const match = type === "ralplan" ? findActionableRalplanMatch(cleanedText, pattern) : findActionableKeywordMatch(cleanedText, pattern);
-    if (match) {
-      detected.push({
-        ...match,
-        type
-      });
-    }
-  }
-  return detected;
-}
-function getAllKeywords(text) {
-  const detected = detectKeywordsWithType(text);
-  if (detected.length === 0) return [];
-  let types = [...new Set(detected.map((d) => d.type))];
-  if (types.includes("cancel")) return ["cancel"];
-  if (types.includes("team") && types.includes("autopilot")) {
-    types = types.filter((t) => t !== "autopilot");
-  }
-  return KEYWORD_PRIORITY.filter((k) => types.includes(k));
-}
-function getAllKeywordsWithSizeCheck(text, options = {}) {
-  const {
-    enabled = true,
-    smallWordLimit = 50,
-    largeWordLimit = 200,
-    suppressHeavyModesForSmallTasks = true
-  } = options;
-  const keywords = getAllKeywords(text);
-  if (!enabled || !suppressHeavyModesForSmallTasks || keywords.length === 0) {
-    return { keywords, taskSizeResult: null, suppressedKeywords: [] };
-  }
-  const thresholds = { smallWordLimit, largeWordLimit };
-  const taskSizeResult = classifyTaskSize(text, thresholds);
-  if (taskSizeResult.size !== "small") {
-    return { keywords, taskSizeResult, suppressedKeywords: [] };
-  }
-  const suppressedKeywords = [];
-  const filteredKeywords = keywords.filter((keyword) => {
-    if (isHeavyMode(keyword)) {
-      suppressedKeywords.push(keyword);
-      return false;
-    }
-    return true;
-  });
-  return {
-    keywords: filteredKeywords,
-    taskSizeResult,
-    suppressedKeywords
-  };
-}
-var EXECUTION_GATE_KEYWORDS = /* @__PURE__ */ new Set([
-  "ralph",
-  "autopilot",
-  "team"
-]);
-var GATE_BYPASS_PREFIXES = ["force:", "!"];
-var WELL_SPECIFIED_SIGNALS = [
-  // References specific files by extension
-  /\b[\w/.-]+\.(?:ts|js|py|go|rs|java|tsx|jsx|vue|svelte|rb|c|cpp|h|css|scss|html|json|yaml|yml|toml)\b/,
-  // References specific paths with directory separators
-  /(?:src|lib|test|spec|app|pages|components|hooks|utils|services|api|dist|build|scripts)\/\w+/,
-  // References specific functions/classes/methods by keyword
-  /\b(?:function|class|method|interface|type|const|let|var|def|fn|struct|enum)\s+\w{2,}/i,
-  // CamelCase identifiers (likely symbol names: processKeyword, getUserById)
-  /\b[a-z]+(?:[A-Z][a-z]+)+\b/,
-  // PascalCase identifiers (likely class/type names: KeywordDetector, UserModel)
-  /\b[A-Z][a-z]+(?:[A-Z][a-z0-9]*)+\b/,
-  // snake_case identifiers with 2+ segments (likely symbol names: user_model, get_user)
-  /\b[a-z]+(?:_[a-z]+)+\b/,
-  // Bare issue/PR number (#123, #42)
-  /(?:^|\s)#\d+\b/,
-  // Has numbered steps or bullet list (structured request)
-  /(?:^|\n)\s*(?:\d+[.)]\s|-\s+\S|\*\s+\S)/m,
-  // Has acceptance criteria or test spec keywords
-  /\b(?:acceptance\s+criteria|test\s+(?:spec|plan|case)|should\s+(?:return|throw|render|display|create|delete|update))\b/i,
-  // Has specific error or issue reference
-  /\b(?:error:|bug\s*#?\d+|issue\s*#\d+|stack\s*trace|exception|TypeError|ReferenceError|SyntaxError)\b/i,
-  // Has a code block with substantial content.
-  // NOTE: In the bridge.ts integration, cleanedText has code blocks pre-stripped by
-  // removeCodeBlocks(), so this regex will not match there. It remains useful for
-  // direct callers of isUnderspecifiedForExecution() that pass raw prompt text.
-  /```[\s\S]{20,}?```/,
-  // PR or commit reference
-  /\b(?:PR\s*#\d+|commit\s+[0-9a-f]{7}|pull\s+request)\b/i,
-  // "in <specific-path>" pattern
-  /\bin\s+[\w/.-]+\.(?:ts|js|py|go|rs|java|tsx|jsx)\b/,
-  // Test runner commands (explicit test target)
-  /\b(?:npm\s+test|npx\s+(?:vitest|jest)|pytest|cargo\s+test|go\s+test|make\s+test)\b/i
-];
-function isUnderspecifiedForExecution(text) {
-  const trimmed = text.trim();
-  if (!trimmed) return true;
-  for (const prefix of GATE_BYPASS_PREFIXES) {
-    if (trimmed.startsWith(prefix)) return false;
-  }
-  if (WELL_SPECIFIED_SIGNALS.some((p) => p.test(trimmed))) return false;
-  const stripped = trimmed.replace(/\b(?:ralph|autopilot|team)\b/gi, "").trim();
-  const effectiveWords = stripped.split(/\s+/).filter((w) => w.length > 0).length;
-  if (effectiveWords <= 15) return true;
-  return false;
-}
-function applyRalplanGate(keywords, text) {
-  if (keywords.length === 0) {
-    return { keywords, gateApplied: false, gatedKeywords: [] };
-  }
-  if (keywords.includes("cancel")) {
-    return { keywords, gateApplied: false, gatedKeywords: [] };
-  }
-  if (keywords.includes("ralplan")) {
-    return { keywords, gateApplied: false, gatedKeywords: [] };
-  }
-  const executionKeywords = keywords.filter((k) => EXECUTION_GATE_KEYWORDS.has(k));
-  if (executionKeywords.length === 0) {
-    return { keywords, gateApplied: false, gatedKeywords: [] };
-  }
-  if (!isUnderspecifiedForExecution(text)) {
-    return { keywords, gateApplied: false, gatedKeywords: [] };
-  }
-  const filtered = keywords.filter((k) => !EXECUTION_GATE_KEYWORDS.has(k));
-  if (!filtered.includes("ralplan")) {
-    filtered.push("ralplan");
-  }
-  return { keywords: filtered, gateApplied: true, gatedKeywords: executionKeywords };
-}
-
 // src/hooks/index.ts
+init_keyword_detector();
 init_ralph();
 init_todo_continuation();
 
@@ -113223,79 +113442,34 @@ function dispatchNotificationInBackground(event, data) {
 
 // src/hooks/bridge.ts
 init_team_canonical_state();
+init_keyword_detector();
 
 // src/hooks/keyword-detector/jev-shadow.ts
+init_keyword_detector();
 init_jev();
-function skillTriggerCriteria() {
-  const priority = Array.isArray(KEYWORD_PRIORITY) ? KEYWORD_PRIORITY : [];
-  return {
-    ...Object.fromEntries(
-      priority.filter((type) => type !== "team").slice(0, 12).map((type) => [type, `The prompt explicitly invokes the ${type} trigger.`])
-    ),
-    none: "No trigger fires; handle the prompt without a mode or skill."
-  };
-}
-function skillTriggerQuestions() {
-  return {
-    "skill-trigger": {
-      type: "Choice",
-      instructions: "Which skill or mode should this user prompt trigger?",
-      criteria: skillTriggerCriteria()
-    }
-  };
-}
 function recordSkillTriggerShadow(prompt, fetchFn) {
-  return resolveJudgment({
-    point: "skill-trigger",
+  return recordJudgment("skill-trigger", {
     state: { prompt, source: "user-prompt-submit" },
-    questions: skillTriggerQuestions(),
     twin: () => getAllKeywords(prompt),
-    blocking: false,
     fetchFn
   });
 }
 var INTENT_SLASH_PATTERN = /^\s*\/(?:oh-my-claudecode:|omc:)?intent(?=\s|$|[?!.,;:])/i;
-var INTENT_QUESTIONS = {
-  intent: {
-    type: "Noul",
-    instructions: "Does this user prompt start an Intent-intake request (a non-engineer contributor stating a problem/goal/constraints to start the requirements intake flow)?",
-    criteria: {
-      true: "The prompt states a problem, goal, or constraints from a contributor and starts the Intent intake \u2014 a goal-level intent.md with problem/goal/users-and-systems/constraints/open-questions, not a solution design.",
-      false: "Everything else: solution or engineering work, informational questions, or an existing workflow. Not an Intent-intake request."
-    }
-  }
-};
 function recordIntentShadow(prompt, fetchFn) {
-  return resolveJudgment({
-    point: "intent",
+  return recordJudgment("intent", {
     state: { prompt, mode_name: "intent" },
-    questions: INTENT_QUESTIONS,
     twin: () => INTENT_SLASH_PATTERN.test(prompt),
-    blocking: false,
     fetchFn
   });
 }
 
 // src/hooks/task-size-detector/jev-shadow.ts
+init_task_size_detector();
 init_jev();
-var TASK_SIZE_QUESTIONS = {
-  "task-size": {
-    type: "Choice",
-    instructions: "What size is this task \u2014 how much orchestration does it warrant?",
-    criteria: {
-      small: "Single-file or few-line change; run directly without heavy modes",
-      medium: "Multi-file but single-area change; standard delegation",
-      large: "Multi-area or architectural change; heavy orchestration (ralph/autopilot/team) is warranted"
-    }
-  }
-};
 function recordTaskSizeShadow(prompt, fetchFn) {
-  return resolveJudgment({
-    point: "task-size",
+  return recordJudgment("task-size", {
     state: { prompt, source: "user-prompt-submit" },
-    questions: TASK_SIZE_QUESTIONS,
     twin: () => classifyTaskSize(prompt),
-    blocking: false,
     fetchFn
   });
 }
@@ -117970,6 +118144,9 @@ init_finder();
 init_parser();
 init_constants();
 init_user_skill_compat();
+
+// src/hooks/learner/jev-shadow.ts
+init_jev();
 
 // src/hooks/learner/promotion.ts
 init_ralph();

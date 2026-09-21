@@ -8,30 +8,12 @@
  * output is byte-identical with and without TYPESAFE_API_KEY — and Jev's
  * Noul/Score answers are recorded only.
  *
- * The resolver logs one Jev answer per shadow line, so the point resolves
- * once per question (Noul, Score); both lines share the same twin decision
- * and iteration state.
+ * The point declaration (both question sets, blocking) lives in the jev
+ * registry (hooks/jev/points.ts). The resolver logs one Jev answer per shadow
+ * line, so the point resolves once per question (Noul, Score); both calls
+ * share the same twin decision and iteration state.
  */
-import { resolveJudgment } from '../jev/index.js';
-const NOUL_QUESTIONS = {
-    task_complete: {
-        type: 'Noul',
-        instructions: 'Is the task complete — is there no substantive work left for this mode?',
-        criteria: {},
-    },
-};
-const SCORE_QUESTIONS = {
-    iteration_progress: {
-        type: 'Score',
-        instructions: 'How much substantive progress did the current iteration make?',
-        criteria: {
-            no_progress: 'No progress',
-            minor_progress: 'Minor progress',
-            moderate_progress: 'Moderate progress',
-            substantial_progress: 'Substantial progress',
-        },
-    },
-};
+import { recordJudgment } from '../jev/index.js';
 /**
  * Iteration metadata only: mode/session/iteration context, tool names, and
  * the continuation-message excerpt (bounded by OMC_JEV_EXCERPT_CHARS in the
@@ -64,20 +46,15 @@ export async function applyLoopContinuationShadow(args) {
         return result;
     const state = buildLoopContinuationState(result, args.sessionId);
     await Promise.all([
-        resolveJudgment({
-            point: 'loop-continuation',
+        recordJudgment('loop-continuation', {
             state,
-            questions: NOUL_QUESTIONS,
             twin: () => result,
-            blocking: true,
             fetchFn: args.fetchFn,
         }),
-        resolveJudgment({
-            point: 'loop-continuation',
+        recordJudgment('loop-continuation', {
             state,
-            questions: SCORE_QUESTIONS,
             twin: () => result,
-            blocking: true,
+            questionSet: 1,
             fetchFn: args.fetchFn,
         }),
     ]);

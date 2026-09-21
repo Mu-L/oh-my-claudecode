@@ -9,6 +9,9 @@
  * answer is recorded only. Degrade paths (timeout, HTTP error, invalid
  * response) are handled inside the resolver and can never alter the verdict;
  * the twin returns a captured value, so twin errors cannot occur.
+ *
+ * The point declaration (questions, blocking flag) lives in the jev registry
+ * (hooks/jev/points.ts); this module keeps the call-specific state shape.
  */
 export interface RalphVerdictShadowArgs {
     /** The existing verification verdict: true = approved, false = rejected. */

@@ -8,9 +8,10 @@
  * output is byte-identical with and without TYPESAFE_API_KEY — and Jev's
  * Noul/Score answers are recorded only.
  *
- * The resolver logs one Jev answer per shadow line, so the point resolves
- * once per question (Noul, Score); both lines share the same twin decision
- * and iteration state.
+ * The point declaration (both question sets, blocking) lives in the jev
+ * registry (hooks/jev/points.ts). The resolver logs one Jev answer per shadow
+ * line, so the point resolves once per question (Noul, Score); both calls
+ * share the same twin decision and iteration state.
  */
 import type { PersistentModeResult } from './index.js';
 export interface LoopContinuationShadowArgs {

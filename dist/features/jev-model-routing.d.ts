@@ -7,6 +7,10 @@
  * shadow. Detector-type point (blocking:false) — this is a high-frequency
  * pre-tool path, so the pinned tier returns immediately and the Jev call
  * settles in the background (issue-3669 latency policy).
+ *
+ * The point declaration (questions, blocking flag) lives in the jev registry
+ * (hooks/jev/points.ts); this module keeps the twin and the call-specific
+ * state construction.
  */
 import { type ResolveResult } from '../hooks/jev/index.js';
 import type { EnforcementResult } from './delegation-enforcer.js';

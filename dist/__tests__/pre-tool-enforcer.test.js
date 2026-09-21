@@ -883,16 +883,31 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     it('falls back to the default preflight threshold when the env value is invalid', () => {
         const transcriptPath = join(tempDir, 'transcript.jsonl');
         writeTranscriptWithContext(transcriptPath, 1000, 800); // 80%
+        for (const threshold of ['abc', '95abc', '0', '101']) {
+            const output = evaluateAgentHeavyPreflight({
+                toolName: 'Task',
+                transcriptPath,
+                env: {
+                    ...process.env,
+                    OMC_AGENT_PREFLIGHT_CONTEXT_THRESHOLD: threshold,
+                },
+            });
+            expect(output?.decision).toBe('block');
+            expect(String(output?.reason)).toContain('threshold: 72%');
+        }
+    });
+    it('preserves a valid preflight threshold env value', () => {
+        const transcriptPath = join(tempDir, 'transcript.jsonl');
+        writeTranscriptWithContext(transcriptPath, 1000, 800); // 80%
         const output = evaluateAgentHeavyPreflight({
             toolName: 'Task',
             transcriptPath,
             env: {
                 ...process.env,
-                OMC_AGENT_PREFLIGHT_CONTEXT_THRESHOLD: 'abc',
+                OMC_AGENT_PREFLIGHT_CONTEXT_THRESHOLD: '85',
             },
         });
-        expect(output?.decision).toBe('block');
-        expect(String(output?.reason)).toContain('threshold: 72%');
+        expect(output).toBeNull();
     });
     it('allows non-agent-heavy tools even when transcript context is high', () => {
         const transcriptPath = join(tempDir, 'transcript.jsonl');

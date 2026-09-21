@@ -5,26 +5,12 @@
  * decides everything; Jev's staleness Score is requested asynchronously
  * (blocking: false) and recorded in the shadow log for later comparison.
  * With no key configured this is a no-op: zero HTTP calls, no log.
+ *
+ * The point declaration (questions, blocking flag) lives in the jev registry
+ * (hooks/jev/points.ts); this module keeps the call-specific state shape.
  */
-import { resolveJudgment } from '../jev/index.js';
+import { recordJudgment } from '../jev/index.js';
 export const CONTEXT_PRUNING_POINT = 'context-pruning';
-/**
- * Score question aligned with the hook's staleness view of context: usage
- * below the warning threshold is fresh, at/above warning is aging, at/above
- * critical is a prune candidate.
- */
-const STALENESS_QUESTIONS = {
-    staleness: {
-        type: 'Score',
-        instructions: 'How stale is this context candidate?',
-        criteria: {
-            fresh: 'Fresh — keep',
-            recent: 'Recent',
-            aging: 'Aging',
-            stale: 'Stale — prune candidate',
-        },
-    },
-};
 /**
  * Record one shadow comparison for the context-pruning point.
  *
@@ -35,8 +21,7 @@ const STALENESS_QUESTIONS = {
  * per candidate.
  */
 export function recordContextPruningShadow(args) {
-    return resolveJudgment({
-        point: CONTEXT_PRUNING_POINT,
+    return recordJudgment(CONTEXT_PRUNING_POINT, {
         state: {
             action: args.action,
             totalTokens: args.totalTokens,
@@ -47,9 +32,7 @@ export function recordContextPruningShadow(args) {
                 excerpt: candidate.excerpt,
             })),
         },
-        questions: STALENESS_QUESTIONS,
         twin: () => args.action,
-        blocking: false,
         fetchFn: args.fetchFn,
     });
 }

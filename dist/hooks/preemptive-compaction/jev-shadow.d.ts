@@ -5,6 +5,9 @@
  * decides everything; Jev's staleness Score is requested asynchronously
  * (blocking: false) and recorded in the shadow log for later comparison.
  * With no key configured this is a no-op: zero HTTP calls, no log.
+ *
+ * The point declaration (questions, blocking flag) lives in the jev registry
+ * (hooks/jev/points.ts); this module keeps the call-specific state shape.
  */
 import type { ResolveResult } from '../jev/index.js';
 export declare const CONTEXT_PRUNING_POINT = "context-pruning";

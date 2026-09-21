@@ -9,9 +9,12 @@
  * prompt submission latency is unchanged. With TYPESAFE_API_KEY unset the
  * resolver short-circuits to the twin with zero HTTP calls.
  *
- * The classification result is consumed by getAllKeywordsWithSizeCheck in
- * bridge.ts; the recorder is wired at the detector level only (runtime
- * invocation from the bridge is a recorded follow-up).
+ * The point declaration (questions, blocking flag) lives in the jev registry
+ * (hooks/jev/points.ts); this module keeps the twin and the call-specific
+ * state construction. The classification result is consumed by
+ * getAllKeywordsWithSizeCheck in bridge.ts; the recorder is wired at the
+ * detector level only (runtime invocation from the bridge is a recorded
+ * follow-up).
  */
 import { type TaskSizeResult } from './index.js';
 import type { ResolveResult } from '../jev/index.js';

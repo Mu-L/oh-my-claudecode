@@ -2233,6 +2233,11 @@ function deepMerge(target, source) {
   }
   return result;
 }
+function parseBackgroundTaskLimit(value) {
+  if (typeof value !== "string" || !/^[1-9]\d*$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed <= MAX_BACKGROUND_TASKS ? parsed : null;
+}
 function loadEnvConfig() {
   const config = {};
   if (process.env.EXA_API_KEY) {
@@ -2253,14 +2258,14 @@ function loadEnvConfig() {
       lspTools: process.env.OMC_LSP_TOOLS === "true"
     };
   }
-  if (process.env.OMC_MAX_BACKGROUND_TASKS) {
-    const maxTasks = parseInt(process.env.OMC_MAX_BACKGROUND_TASKS, 10);
-    if (!isNaN(maxTasks)) {
-      config.permissions = {
-        ...config.permissions,
-        maxBackgroundTasks: maxTasks
-      };
-    }
+  const maxBackgroundTasks = parseBackgroundTaskLimit(
+    process.env.OMC_MAX_BACKGROUND_TASKS
+  );
+  if (maxBackgroundTasks !== null) {
+    config.permissions = {
+      ...config.permissions,
+      maxBackgroundTasks
+    };
   }
   if (process.env.OMC_ROUTING_ENABLED !== void 0) {
     config.routing = {
@@ -2615,7 +2620,7 @@ function loadConfig() {
   validateAutopilotConfig(config);
   return config;
 }
-var import_fs7, import_path9, DEFAULT_CONFIG, CANONICAL_TEAM_ROLE_SET, KNOWN_AGENT_NAME_SET, TEAM_ROLE_PROVIDERS, TEAM_ROLE_TIERS, AUTOPILOT_EXECUTION_BACKENDS, AUTOPILOT_PLANNING_MODES, AUTOPILOT_TEAM_AGENT_TYPES, AUTOPILOT_WORKFLOW_NAME, AUTOPILOT_WORKFLOW_RESERVED_NAMES, AUTOPILOT_WORKFLOW_SEQUENCES;
+var import_fs7, import_path9, DEFAULT_CONFIG, MAX_BACKGROUND_TASKS, CANONICAL_TEAM_ROLE_SET, KNOWN_AGENT_NAME_SET, TEAM_ROLE_PROVIDERS, TEAM_ROLE_TIERS, AUTOPILOT_EXECUTION_BACKENDS, AUTOPILOT_PLANNING_MODES, AUTOPILOT_TEAM_AGENT_TYPES, AUTOPILOT_WORKFLOW_NAME, AUTOPILOT_WORKFLOW_RESERVED_NAMES, AUTOPILOT_WORKFLOW_SEQUENCES;
 var init_loader = __esm({
   "src/config/loader.ts"() {
     "use strict";
@@ -2628,6 +2633,7 @@ var init_loader = __esm({
     init_types2();
     init_delegation_routing();
     DEFAULT_CONFIG = buildDefaultConfig();
+    MAX_BACKGROUND_TASKS = 50;
     CANONICAL_TEAM_ROLE_SET = new Set(CANONICAL_TEAM_ROLES);
     KNOWN_AGENT_NAME_SET = new Set(KNOWN_AGENT_NAMES);
     TEAM_ROLE_PROVIDERS = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "grok", "cursor", "antigravity"]);
@@ -5586,6 +5592,220 @@ var init_resolver2 = __esm({
   }
 });
 
+// src/hooks/task-size-detector/index.ts
+var init_task_size_detector = __esm({
+  "src/hooks/task-size-detector/index.ts"() {
+    "use strict";
+  }
+});
+
+// src/hooks/keyword-detector/index.ts
+var KEYWORD_PRIORITY, CANONICAL_WORKFLOW_SLASH_SKILLS, WORKFLOW_SLASH_PATTERN, PATH_SEGMENT_CHARS, FILE_PATH_PATTERN;
+var init_keyword_detector = __esm({
+  "src/hooks/keyword-detector/index.ts"() {
+    "use strict";
+    init_task_size_detector();
+    KEYWORD_PRIORITY = [
+      "cancel",
+      "ralph",
+      "autopilot",
+      "team",
+      "ralplan",
+      "tdd",
+      "code-review",
+      "security-review",
+      "ultrathink",
+      "deepsearch",
+      "analyze",
+      "deep-interview",
+      "codex",
+      "gemini",
+      "cursor",
+      "antigravity"
+    ];
+    CANONICAL_WORKFLOW_SLASH_SKILLS = [
+      "autopilot",
+      "ralph",
+      "team",
+      "ultraqa",
+      "deep-interview",
+      "ralplan",
+      "self-improve"
+    ];
+    WORKFLOW_SLASH_PATTERN = new RegExp(
+      "^\\s*/(?:oh-my-claudecode:|omc:)?(" + CANONICAL_WORKFLOW_SLASH_SKILLS.map((skill) => skill.replace(/-/g, "\\-")).join("|") + ")(?=\\s|$|[?!.,;:])",
+      "i"
+    );
+    PATH_SEGMENT_CHARS = "[\\w.\\-\\u3000-\\u9FFF\\uAC00-\\uD7AF\\u0400-\\u04FF\\u0600-\\u06FF\\u0900-\\u097F\\u0E00-\\u0E7F\\u1000-\\u109F]";
+    FILE_PATH_PATTERN = new RegExp(
+      "(^|[\\s\"'`(])(?:\\/)?(?:" + PATH_SEGMENT_CHARS + "+\\/)+(?:" + PATH_SEGMENT_CHARS + "*\\.\\w+|[\\w.\\-]+)",
+      "gm"
+    );
+  }
+});
+
+// src/hooks/jev/points.ts
+function skillTriggerCriteria() {
+  const priority = Array.isArray(KEYWORD_PRIORITY) ? KEYWORD_PRIORITY : [];
+  return {
+    ...Object.fromEntries(
+      priority.filter((type) => type !== "team").slice(0, 12).map((type) => [type, `The prompt explicitly invokes the ${type} trigger.`])
+    ),
+    none: "No trigger fires; handle the prompt without a mode or skill."
+  };
+}
+function skillTriggerQuestions() {
+  return {
+    "skill-trigger": {
+      type: "Choice",
+      instructions: "Which skill or mode should this user prompt trigger?",
+      criteria: skillTriggerCriteria()
+    }
+  };
+}
+function defineJudgmentPoint(definition) {
+  return {
+    name: definition.name,
+    questions: Array.isArray(definition.questions) ? definition.questions : [definition.questions],
+    blocking: definition.blocking
+  };
+}
+var INTENT_QUESTIONS, NOUL_QUESTIONS, SCORE_QUESTIONS, MODEL_ROUTING_QUESTIONS, STALENESS_QUESTIONS, VERDICT_QUESTIONS, TASK_SIZE_QUESTIONS, LEARNER_EXTRACTION_QUESTIONS, SLOP_WARNING_QUESTIONS, SIMPLIFIER_TRIGGER_QUESTIONS, JUDGMENT_POINTS;
+var init_points = __esm({
+  "src/hooks/jev/points.ts"() {
+    "use strict";
+    init_keyword_detector();
+    init_resolver2();
+    INTENT_QUESTIONS = {
+      intent: {
+        type: "Noul",
+        instructions: "Does this user prompt start an Intent-intake request (a non-engineer contributor stating a problem/goal/constraints to start the requirements intake flow)?",
+        criteria: {
+          true: "The prompt states a problem, goal, or constraints from a contributor and starts the Intent intake \u2014 a goal-level intent.md with problem/goal/users-and-systems/constraints/open-questions, not a solution design.",
+          false: "Everything else: solution or engineering work, informational questions, or an existing workflow. Not an Intent-intake request."
+        }
+      }
+    };
+    NOUL_QUESTIONS = {
+      task_complete: {
+        type: "Noul",
+        instructions: "Is the task complete \u2014 is there no substantive work left for this mode?",
+        criteria: {}
+      }
+    };
+    SCORE_QUESTIONS = {
+      iteration_progress: {
+        type: "Score",
+        instructions: "How much substantive progress did the current iteration make?",
+        criteria: {
+          no_progress: "No progress",
+          minor_progress: "Minor progress",
+          moderate_progress: "Moderate progress",
+          substantial_progress: "Substantial progress"
+        }
+      }
+    };
+    MODEL_ROUTING_QUESTIONS = {
+      "model-tier": {
+        type: "Choice",
+        instructions: "Which model tier should this delegated task use?",
+        criteria: {
+          haiku: "Quick lookups and lightweight, mechanical work",
+          sonnet: "Standard coding and orchestration work",
+          opus: "Complex architecture and deep analysis"
+        }
+      }
+    };
+    STALENESS_QUESTIONS = {
+      staleness: {
+        type: "Score",
+        instructions: "How stale is this context candidate?",
+        criteria: {
+          fresh: "Fresh \u2014 keep",
+          recent: "Recent",
+          aging: "Aging",
+          stale: "Stale \u2014 prune candidate"
+        }
+      }
+    };
+    VERDICT_QUESTIONS = {
+      completion_criteria_met: {
+        type: "Noul",
+        instructions: "Does the completion claim satisfy the PRD acceptance criteria for this mode?",
+        criteria: {
+          true: "All acceptance criteria are demonstrably satisfied by the evidence",
+          false: "At least one criterion is unmet or evidence is missing"
+        }
+      }
+    };
+    TASK_SIZE_QUESTIONS = {
+      "task-size": {
+        type: "Choice",
+        instructions: "What size is this task \u2014 how much orchestration does it warrant?",
+        criteria: {
+          small: "Single-file or few-line change; run directly without heavy modes",
+          medium: "Multi-file but single-area change; standard delegation",
+          large: "Multi-area or architectural change; heavy orchestration (ralph/autopilot/team) is warranted"
+        }
+      }
+    };
+    LEARNER_EXTRACTION_QUESTIONS = {
+      extractable_moment: {
+        type: "Noul",
+        instructions: "Does this assistant message contain an extractable memory-worthy moment?",
+        criteria: {
+          true: "Contains a reusable pattern, decision, or correction worth persisting",
+          false: "Routine work with nothing worth extracting"
+        }
+      }
+    };
+    SLOP_WARNING_QUESTIONS = {
+      slop_advisory: {
+        type: "Noul",
+        instructions: "Does this tool input contain fallback/workaround language worth an advisory warning?",
+        criteria: {
+          true: "Contains fallback/workaround phrasing outside doc or self-referential context",
+          false: "No advisory-worthy language"
+        }
+      }
+    };
+    SIMPLIFIER_TRIGGER_QUESTIONS = {
+      simplification_worthy: {
+        type: "Noul",
+        instructions: "Is this change simplification-worthy enough to inject the simplifier delegation?",
+        criteria: {
+          true: "The change would benefit from a simplification pass (duplication, speculative flexibility, over-abstraction)",
+          false: "Change is already minimal or not code"
+        }
+      }
+    };
+    JUDGMENT_POINTS = {
+      intent: defineJudgmentPoint({ name: "intent", questions: INTENT_QUESTIONS, blocking: false }),
+      "loop-continuation": defineJudgmentPoint({
+        name: "loop-continuation",
+        questions: [NOUL_QUESTIONS, SCORE_QUESTIONS],
+        blocking: true
+      }),
+      "skill-trigger": defineJudgmentPoint({ name: "skill-trigger", questions: skillTriggerQuestions, blocking: false }),
+      "model-routing": defineJudgmentPoint({ name: "model-routing", questions: MODEL_ROUTING_QUESTIONS, blocking: false }),
+      "context-pruning": defineJudgmentPoint({ name: "context-pruning", questions: STALENESS_QUESTIONS, blocking: false }),
+      "ralph-verdict": defineJudgmentPoint({ name: "ralph-verdict", questions: VERDICT_QUESTIONS, blocking: true }),
+      "task-size": defineJudgmentPoint({ name: "task-size", questions: TASK_SIZE_QUESTIONS, blocking: false }),
+      "learner-extraction": defineJudgmentPoint({
+        name: "learner-extraction",
+        questions: LEARNER_EXTRACTION_QUESTIONS,
+        blocking: false
+      }),
+      "slop-warning": defineJudgmentPoint({ name: "slop-warning", questions: SLOP_WARNING_QUESTIONS, blocking: false }),
+      "simplifier-trigger": defineJudgmentPoint({
+        name: "simplifier-trigger",
+        questions: SIMPLIFIER_TRIGGER_QUESTIONS,
+        blocking: false
+      })
+    };
+  }
+});
+
 // src/hooks/jev/index.ts
 var init_jev = __esm({
   "src/hooks/jev/index.ts"() {
@@ -5594,6 +5814,7 @@ var init_jev = __esm({
     init_config();
     init_client();
     init_resolver2();
+    init_points();
   }
 });
 
