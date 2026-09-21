@@ -5,14 +5,14 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "0c0d66d6ab1d3e8f3adedff950280dd73f758ce0",
+    "head": "b7be6b2cf7bb71d0bc7f348c56adb3c9bc13e6d9",
     "sourceSha256": "4c5a48e87a9f1eb27c8794f454fc89ea9fdc48ec2bb31cba02d4dd92dfe9b616",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "0c0d66d6ab1d3e8f3adedff950280dd73f758ce0",
+  "head": "b7be6b2cf7bb71d0bc7f348c56adb3c9bc13e6d9",
   "sourceSha256": "4c5a48e87a9f1eb27c8794f454fc89ea9fdc48ec2bb31cba02d4dd92dfe9b616",
   "counts": {
     "public": {
@@ -32,9 +32,9 @@
       "total": 1406
     },
     "generated": {
-      "distFiles": 5058,
+      "distFiles": 5066,
       "bridgeFiles": 9,
-      "total": 5067
+      "total": 5075
     },
     "prompt": {
       "promptLikeFiles": 61
@@ -2497,6 +2497,8 @@
       "dist/features/index.js.map",
       "dist/features/jev-model-routing.d.ts",
       "dist/features/jev-model-routing.js",
+      "dist/features/jev-slop-warning.d.ts",
+      "dist/features/jev-slop-warning.js",
       "dist/features/lookout/command-parser.d.ts",
       "dist/features/lookout/command-parser.d.ts.map",
       "dist/features/lookout/command-parser.js",
@@ -2998,6 +3000,8 @@
       "dist/hooks/code-simplifier/index.d.ts.map",
       "dist/hooks/code-simplifier/index.js",
       "dist/hooks/code-simplifier/index.js.map",
+      "dist/hooks/code-simplifier/jev-shadow.d.ts",
+      "dist/hooks/code-simplifier/jev-shadow.js",
       "dist/hooks/codebase-map.d.ts",
       "dist/hooks/codebase-map.d.ts.map",
       "dist/hooks/codebase-map.js",
@@ -3092,6 +3096,8 @@
       "dist/hooks/jev/config.js",
       "dist/hooks/jev/index.d.ts",
       "dist/hooks/jev/index.js",
+      "dist/hooks/jev/points.d.ts",
+      "dist/hooks/jev/points.js",
       "dist/hooks/jev/resolver.d.ts",
       "dist/hooks/jev/resolver.js",
       "dist/hooks/jev/types.d.ts",
@@ -3142,6 +3148,8 @@
       "dist/hooks/learner/index.d.ts.map",
       "dist/hooks/learner/index.js",
       "dist/hooks/learner/index.js.map",
+      "dist/hooks/learner/jev-shadow.d.ts",
+      "dist/hooks/learner/jev-shadow.js",
       "dist/hooks/learner/loader.d.ts",
       "dist/hooks/learner/loader.d.ts.map",
       "dist/hooks/learner/loader.js",
@@ -15539,6 +15547,16 @@
         "path": "dist/features/jev-model-routing.js"
       },
       {
+        "id": "dist/features/jev-slop-warning.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/features/jev-slop-warning.d.ts"
+      },
+      {
+        "id": "dist/features/jev-slop-warning.js",
+        "kind": "generated-dist",
+        "path": "dist/features/jev-slop-warning.js"
+      },
+      {
         "id": "dist/features/lookout/command-parser.d.ts",
         "kind": "generated-dist",
         "path": "dist/features/lookout/command-parser.d.ts"
@@ -18044,6 +18062,16 @@
         "path": "dist/hooks/code-simplifier/index.js.map"
       },
       {
+        "id": "dist/hooks/code-simplifier/jev-shadow.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/hooks/code-simplifier/jev-shadow.d.ts"
+      },
+      {
+        "id": "dist/hooks/code-simplifier/jev-shadow.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/code-simplifier/jev-shadow.js"
+      },
+      {
         "id": "dist/hooks/codebase-map.d.ts",
         "kind": "generated-dist",
         "path": "dist/hooks/codebase-map.d.ts"
@@ -18514,6 +18542,16 @@
         "path": "dist/hooks/jev/index.js"
       },
       {
+        "id": "dist/hooks/jev/points.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/hooks/jev/points.d.ts"
+      },
+      {
+        "id": "dist/hooks/jev/points.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/jev/points.js"
+      },
+      {
         "id": "dist/hooks/jev/resolver.d.ts",
         "kind": "generated-dist",
         "path": "dist/hooks/jev/resolver.d.ts"
@@ -18762,6 +18800,16 @@
         "id": "dist/hooks/learner/index.js.map",
         "kind": "generated-dist",
         "path": "dist/hooks/learner/index.js.map"
+      },
+      {
+        "id": "dist/hooks/learner/jev-shadow.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/hooks/learner/jev-shadow.d.ts"
+      },
+      {
+        "id": "dist/hooks/learner/jev-shadow.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/learner/jev-shadow.js"
       },
       {
         "id": "dist/hooks/learner/loader.d.ts",
@@ -80837,12 +80885,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7055,
+      "nodeCount": 7063,
       "edgeCount": 7815,
       "importEdgeCount": 6430,
       "registerEdgeCount": 64
     }
   },
   "inventorySha256": "71947a21e024d853dfa5c8c677e9b84cba8dcdf468aaacee2e4fe82b66404d7c",
-  "manifestSha256": "ca46f62f6676dae136f03a0eb35aeef4544136e1ef0cbebd254471906d06bfa9"
+  "manifestSha256": "21f5ed7916b24a0ccffedb4df06dc8ad43d24e53f4d568c5d24393f22a09602d"
 }
