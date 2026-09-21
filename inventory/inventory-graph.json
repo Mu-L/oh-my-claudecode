@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "f4cf090c4285b19833c30a2f0fb349e53ef7406d",
-    "sourceSha256": "3f6d52d503fa74605f43199b04000bd446f620729b27d7f8493b4302716dd105",
+    "head": "4650108b13cbb1546e488467a5b54286af72e4dd",
+    "sourceSha256": "7bdfed8105c059bff40c0d5d11401c2c7865c0f7bd3a8894822742fd894cf5d1",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "f4cf090c4285b19833c30a2f0fb349e53ef7406d",
-  "sourceSha256": "3f6d52d503fa74605f43199b04000bd446f620729b27d7f8493b4302716dd105",
+  "head": "4650108b13cbb1546e488467a5b54286af72e4dd",
+  "sourceSha256": "7bdfed8105c059bff40c0d5d11401c2c7865c0f7bd3a8894822742fd894cf5d1",
   "counts": {
     "public": {
       "skills": 43,
@@ -23,13 +23,13 @@
       "total": 92
     },
     "internal": {
-      "hookFiles": 309,
+      "hookFiles": 313,
       "featureFiles": 82,
       "toolFiles": 61,
       "libFiles": 43,
       "templateHooks": 22,
-      "srcFiles": 1372,
-      "total": 1394
+      "srcFiles": 1376,
+      "total": 1398
     },
     "generated": {
       "distFiles": 5032,
@@ -41,7 +41,7 @@
     },
     "skills": 43,
     "commands": 21,
-    "hookFiles": 309,
+    "hookFiles": 313,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 61
@@ -345,7 +345,9 @@
       "src/hooks/project-memory/storage.ts",
       "src/hooks/project-memory/types.ts",
       "src/hooks/prompt-prerequisites/index.ts",
+      "src/hooks/ralph/__tests__/jev-verdict-shadow.test.ts",
       "src/hooks/ralph/index.ts",
+      "src/hooks/ralph/jev-shadow.ts",
       "src/hooks/ralph/loop.ts",
       "src/hooks/ralph/prd.ts",
       "src/hooks/ralph/progress.ts",
@@ -419,7 +421,9 @@
       "src/hooks/subagent-tracker/session-replay.ts",
       "src/hooks/subagent-tracker/worktree-evidence.ts",
       "src/hooks/task-size-detector/__tests__/index.test.ts",
+      "src/hooks/task-size-detector/__tests__/jev-shadow.test.ts",
       "src/hooks/task-size-detector/index.ts",
+      "src/hooks/task-size-detector/jev-shadow.ts",
       "src/hooks/team-canonical-state.ts",
       "src/hooks/team-dispatch-hook.ts",
       "src/hooks/team-leader-nudge-hook.ts",
@@ -6095,7 +6099,9 @@
       "src/hooks/project-memory/storage.ts",
       "src/hooks/project-memory/types.ts",
       "src/hooks/prompt-prerequisites/index.ts",
+      "src/hooks/ralph/__tests__/jev-verdict-shadow.test.ts",
       "src/hooks/ralph/index.ts",
+      "src/hooks/ralph/jev-shadow.ts",
       "src/hooks/ralph/loop.ts",
       "src/hooks/ralph/prd.ts",
       "src/hooks/ralph/progress.ts",
@@ -6169,7 +6175,9 @@
       "src/hooks/subagent-tracker/session-replay.ts",
       "src/hooks/subagent-tracker/worktree-evidence.ts",
       "src/hooks/task-size-detector/__tests__/index.test.ts",
+      "src/hooks/task-size-detector/__tests__/jev-shadow.test.ts",
       "src/hooks/task-size-detector/index.ts",
+      "src/hooks/task-size-detector/jev-shadow.ts",
       "src/hooks/team-canonical-state.ts",
       "src/hooks/team-dispatch-hook.ts",
       "src/hooks/team-leader-nudge-hook.ts",
@@ -37939,9 +37947,19 @@
         "path": "src/hooks/prompt-prerequisites/index.ts"
       },
       {
+        "id": "src/hooks/ralph/__tests__/jev-verdict-shadow.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/ralph/__tests__/jev-verdict-shadow.test.ts"
+      },
+      {
         "id": "src/hooks/ralph/index.ts",
         "kind": "hook",
         "path": "src/hooks/ralph/index.ts"
+      },
+      {
+        "id": "src/hooks/ralph/jev-shadow.ts",
+        "kind": "hook",
+        "path": "src/hooks/ralph/jev-shadow.ts"
       },
       {
         "id": "src/hooks/ralph/loop.ts",
@@ -38309,9 +38327,19 @@
         "path": "src/hooks/task-size-detector/__tests__/index.test.ts"
       },
       {
+        "id": "src/hooks/task-size-detector/__tests__/jev-shadow.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/task-size-detector/__tests__/jev-shadow.test.ts"
+      },
+      {
         "id": "src/hooks/task-size-detector/index.ts",
         "kind": "hook",
         "path": "src/hooks/task-size-detector/index.ts"
+      },
+      {
+        "id": "src/hooks/task-size-detector/jev-shadow.ts",
+        "kind": "hook",
+        "path": "src/hooks/task-size-detector/jev-shadow.ts"
       },
       {
         "id": "src/hooks/team-canonical-state.ts",
@@ -58102,6 +58130,11 @@
       },
       {
         "from": "src/hooks/bridge.ts",
+        "to": "src/hooks/task-size-detector/jev-shadow.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/bridge.ts",
         "to": "src/hooks/team-canonical-state.ts",
         "kind": "imports"
       },
@@ -60562,6 +60595,16 @@
       },
       {
         "from": "src/hooks/persistent-mode/index.ts",
+        "to": "src/hooks/ralph/jev-shadow.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/persistent-mode/index.ts",
+        "to": "src/hooks/ralph/prd.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/persistent-mode/index.ts",
         "to": "src/hooks/skill-state/index.ts",
         "kind": "imports"
       },
@@ -61431,6 +61474,36 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/hooks/ralph/__tests__/jev-verdict-shadow.test.ts",
+        "to": "external:node:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/jev-verdict-shadow.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/jev-verdict-shadow.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/jev-verdict-shadow.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/jev-verdict-shadow.test.ts",
+        "to": "src/hooks/jev/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/jev-verdict-shadow.test.ts",
+        "to": "src/hooks/ralph/jev-shadow.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/ralph/index.ts",
         "to": "src/hooks/ralph/loop.ts",
         "kind": "exports"
@@ -61479,6 +61552,16 @@
         "from": "src/hooks/ralph/index.ts",
         "to": "src/hooks/ralph/verifier.ts",
         "kind": "type-exports"
+      },
+      {
+        "from": "src/hooks/ralph/jev-shadow.ts",
+        "to": "src/hooks/jev/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/jev-shadow.ts",
+        "to": "src/hooks/jev/index.ts",
+        "kind": "type-imports"
       },
       {
         "from": "src/hooks/ralph/loop.ts",
@@ -63449,6 +63532,66 @@
         "from": "src/hooks/task-size-detector/__tests__/index.test.ts",
         "to": "src/hooks/task-size-detector/index.ts",
         "kind": "imports"
+      },
+      {
+        "from": "src/hooks/task-size-detector/__tests__/jev-shadow.test.ts",
+        "to": "external:node:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/task-size-detector/__tests__/jev-shadow.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/task-size-detector/__tests__/jev-shadow.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/task-size-detector/__tests__/jev-shadow.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/task-size-detector/__tests__/jev-shadow.test.ts",
+        "to": "src/hooks/jev/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/task-size-detector/__tests__/jev-shadow.test.ts",
+        "to": "src/hooks/jev/index.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/task-size-detector/__tests__/jev-shadow.test.ts",
+        "to": "src/hooks/task-size-detector/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/task-size-detector/__tests__/jev-shadow.test.ts",
+        "to": "src/hooks/task-size-detector/jev-shadow.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/task-size-detector/jev-shadow.ts",
+        "to": "src/hooks/jev/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/task-size-detector/jev-shadow.ts",
+        "to": "src/hooks/jev/index.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/task-size-detector/jev-shadow.ts",
+        "to": "src/hooks/task-size-detector/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/task-size-detector/jev-shadow.ts",
+        "to": "src/hooks/task-size-detector/index.ts",
+        "kind": "type-imports"
       },
       {
         "from": "src/hooks/team-canonical-state.ts",
@@ -80222,12 +80365,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7014,
-      "edgeCount": 7743,
-      "importEdgeCount": 6367,
+      "nodeCount": 7018,
+      "edgeCount": 7766,
+      "importEdgeCount": 6385,
       "registerEdgeCount": 64
     }
   },
-  "inventorySha256": "e6d055ebce3127485497a142266cd121c8c8f94fe688599e303734092d50e469",
-  "manifestSha256": "38b93d9daf3be7553eb64e23c96657813dd542dee28e97788fca47607feaddfa"
+  "inventorySha256": "89925dc9ede73d4b3650c4687ef4a14d2a2d9a970db4d142391ecf78f448b704",
+  "manifestSha256": "334906898c228342f8a947dde99c61ed56afe0bada5e23e7617ab93aac6849e9"
 }
