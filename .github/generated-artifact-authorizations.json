@@ -17421,12 +17421,12 @@
       "pullNumber": 4066,
       "targetRef": "main",
       "mergeBaseSha": "5281b19e0d64f8e6dc6767f2130299a88af2dc71",
-      "headSha": "4ccdc3fbebcfda69af572d8908955228a2e136d5",
+      "headSha": "19af56431d7e8cac617dd673ab499262edfa61f3",
       "owner": "Yeachan-Heo",
       "expiresAt": "2026-10-31T00:00:00.000Z",
       "generatedDelta": {
-        "count": 403,
-        "sha256": "5606bb77d5d7bc83c4d69ac45bebc22a4e6866d6b4297fe50f2391879a9c6e1c"
+        "count": 411,
+        "sha256": "f6bc32d32995db22b8ce3656d188660699d106efd16cbf26c0134c69bfd47d04"
       },
       "generatedFiles": [
         {
@@ -17958,6 +17958,18 @@
           "previousFilename": null
         },
         {
+          "status": "added",
+          "filename": "dist/features/jev-slop-warning.d.ts",
+          "sha": "7476df5ec5253029eab1544685a3f26d4302ed29",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/features/jev-slop-warning.js",
+          "sha": "daaef2fe31fb074aada8625e102eaa10dd4d394b",
+          "previousFilename": null
+        },
+        {
           "status": "modified",
           "filename": "dist/graph/runtime/contained-fd.d.ts",
           "sha": "c8293b6716a93c97ef9cc3e019abd939edb8261a",
@@ -18145,6 +18157,18 @@
         },
         {
           "status": "added",
+          "filename": "dist/hooks/code-simplifier/jev-shadow.d.ts",
+          "sha": "2c8fd9fd8cd9630d2f7ee1b917984426be68e27d",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/hooks/code-simplifier/jev-shadow.js",
+          "sha": "104d65f358edbe4d2bf164e07be2e5b2c1788f18",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
           "filename": "dist/hooks/jev/client.d.ts",
           "sha": "e65c2444bbe70b6a59a66d6bea8afe7fb911ba0c",
           "previousFilename": null
@@ -18177,6 +18201,18 @@
           "status": "added",
           "filename": "dist/hooks/jev/index.js",
           "sha": "cf5e1c59ecc11b016f8d0adbc5d87e3ffc41659a",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/hooks/jev/points.d.ts",
+          "sha": "7800dad344939219e97eeb0eadbe978452d8d2ff",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/hooks/jev/points.js",
+          "sha": "c2cda22ffc01f7f24e3adfe95dbb41658428f237",
           "previousFilename": null
         },
         {
@@ -18255,6 +18291,18 @@
           "status": "modified",
           "filename": "dist/hooks/learner/detection-hook.js.map",
           "sha": "0697221dfe35dca7352db8d017759cfeb4ad0919",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/hooks/learner/jev-shadow.d.ts",
+          "sha": "84f89b56d4d35d83b09b750586bb508e5df31d80",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/hooks/learner/jev-shadow.js",
+          "sha": "734da5542436a848c9e3a7141d4d2be0f43dd2a7",
           "previousFilename": null
         },
         {
