@@ -5,7 +5,7 @@
  * (judgment point, heuristic twin, shadow mode, degraded mode).
  */
 /** The five judgment points, in delivery order. */
-export type JudgmentPointName = 'intent' | 'loop-continuation' | 'skill-trigger' | 'model-routing' | 'context-pruning';
+export type JudgmentPointName = 'intent' | 'loop-continuation' | 'skill-trigger' | 'model-routing' | 'context-pruning' | 'task-size' | 'ralph-verdict';
 /** TypeSafe question shapes. */
 export type JevQuestionType = 'Choice' | 'Score' | 'Noul';
 export interface JevQuestionDef {

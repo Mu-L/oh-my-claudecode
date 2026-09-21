@@ -52811,6 +52811,42 @@ var init_cancel = __esm({
   }
 });
 
+// src/hooks/ralph/jev-shadow.ts
+async function applyRalphVerdictShadow(args) {
+  const { verdict } = args;
+  await resolveJudgment({
+    point: "ralph-verdict",
+    state: {
+      verdict,
+      prd_criteria: args.prdContext,
+      claim: args.claim,
+      critic_mode: args.criticMode ?? null
+    },
+    questions: VERDICT_QUESTIONS,
+    twin: () => verdict,
+    blocking: true,
+    fetchFn: args.fetchFn
+  });
+  return verdict;
+}
+var VERDICT_QUESTIONS;
+var init_jev_shadow = __esm({
+  "src/hooks/ralph/jev-shadow.ts"() {
+    "use strict";
+    init_jev();
+    VERDICT_QUESTIONS = {
+      completion_criteria_met: {
+        type: "Noul",
+        instructions: "Does the completion claim satisfy the PRD acceptance criteria for this mode?",
+        criteria: {
+          true: "All acceptance criteria are demonstrably satisfied by the evidence",
+          false: "At least one criterion is unmet or evidence is missing"
+        }
+      }
+    };
+  }
+});
+
 // src/hooks/persistent-mode/jev-shadow.ts
 function buildLoopContinuationState(result, sessionId) {
   return {
@@ -52848,7 +52884,7 @@ async function applyLoopContinuationShadow(args) {
   return result;
 }
 var NOUL_QUESTIONS, SCORE_QUESTIONS;
-var init_jev_shadow = __esm({
+var init_jev_shadow2 = __esm({
   "src/hooks/persistent-mode/jev-shadow.ts"() {
     "use strict";
     init_jev();
@@ -53527,6 +53563,10 @@ function checkArchitectRejectionInTranscript(sessionId) {
   }
   return { rejected: false, feedback: "" };
 }
+function verificationCriteriaExcerpt(workingDir, sessionId, story) {
+  const criteria = story?.acceptanceCriteria ?? readPrd(workingDir, sessionId)?.userStories.flatMap((s) => s.acceptanceCriteria) ?? [];
+  return criteria.join("; ");
+}
 async function checkRalphLoop(sessionId, directory, cancelInProgress) {
   const workingDir = resolveToWorktreeRoot(directory);
   const state = readRalphState(workingDir, sessionId);
@@ -53599,6 +53639,12 @@ async function checkRalphLoop(sessionId, directory, cancelInProgress) {
     if (verificationState?.pending) {
       if (sessionId) {
         if (checkArchitectApprovalInTranscript(sessionId, verificationState)) {
+          await applyRalphVerdictShadow({
+            verdict: true,
+            prdContext: verificationCriteriaExcerpt(workingDir, sessionId, verifiedStory),
+            claim: verificationState.completion_claim,
+            criticMode: verificationState.critic_mode
+          });
           if (verificationState.verification_scope === "story" && verificationState.story_id) {
             const consumed = consumeStoryArchitectApproval(
               workingDir,
@@ -53683,6 +53729,12 @@ async function checkRalphLoop(sessionId, directory, cancelInProgress) {
         }
         const rejection = checkArchitectRejectionInTranscript(sessionId);
         if (verificationState && rejection.rejected) {
+          await applyRalphVerdictShadow({
+            verdict: false,
+            prdContext: verificationCriteriaExcerpt(workingDir, sessionId, verifiedStory),
+            claim: verificationState.completion_claim,
+            criticMode: verificationState.critic_mode
+          });
           if (verificationState.verification_scope === "story" && verificationState.story_id) {
             markStoryIncomplete(workingDir, verificationState.story_id, rejection.feedback, sessionId);
           }
@@ -54434,13 +54486,14 @@ var init_persistent_mode = __esm({
     init_worktree_paths();
     init_mode_state_io();
     init_ralph();
+    init_jev_shadow();
     init_todo_continuation();
     init_hooks();
     init_autopilot();
     init_enforcement();
     init_state();
     init_subagent_tracker();
-    init_jev_shadow();
+    init_jev_shadow2();
     init_truncate_prompt();
     init_mode_registry();
     init_named_workflow_resume_validator();
@@ -113223,6 +113276,30 @@ function recordIntentShadow(prompt, fetchFn) {
   });
 }
 
+// src/hooks/task-size-detector/jev-shadow.ts
+init_jev();
+var TASK_SIZE_QUESTIONS = {
+  "task-size": {
+    type: "Choice",
+    instructions: "What size is this task \u2014 how much orchestration does it warrant?",
+    criteria: {
+      small: "Single-file or few-line change; run directly without heavy modes",
+      medium: "Multi-file but single-area change; standard delegation",
+      large: "Multi-area or architectural change; heavy orchestration (ralph/autopilot/team) is warranted"
+    }
+  }
+};
+function recordTaskSizeShadow(prompt, fetchFn) {
+  return resolveJudgment({
+    point: "task-size",
+    state: { prompt, source: "user-prompt-submit" },
+    questions: TASK_SIZE_QUESTIONS,
+    twin: () => classifyTaskSize(prompt),
+    blocking: false,
+    fetchFn
+  });
+}
+
 // src/hooks/omc-orchestrator/index.ts
 var path14 = __toESM(require("path"), 1);
 var import_os13 = require("os");
@@ -116299,6 +116376,8 @@ Running directly without heavy agent stacking. Prefix with \`quick:\`, \`simple:
   void recordSkillTriggerShadow(cleanedText).catch(() => {
   });
   void recordIntentShadow(cleanedText).catch(() => {
+  });
+  void recordTaskSizeShadow(cleanedText).catch(() => {
   });
   const promptPrerequisiteParse = parsePromptPrerequisiteSections(promptText, promptPrerequisiteConfig);
   const executionKeywords = fullKeywords.filter(

@@ -18,6 +18,7 @@ import { getGlobalOmcConfigCandidates } from '../../utils/paths.js';
 import { resolveToWorktreeRoot, resolveSessionStatePath, resolveStatePath, getOmcRoot } from '../../lib/worktree-paths.js';
 import { captureModeStateCleanup, captureStateFileGeneration, clearModeStateFile, clearStateFileLockedIf, canClearStateForSession, readModeState, readModeStateWithMeta, recoverEmergencyStateFile, writeModeState, withStateFileMutationLock, } from '../../lib/mode-state-io.js';
 import { readRalphState, writeRalphState, restoreRalphStateIfAbsent, incrementRalphIteration, clearRalphState, findPrdPath, getPrdCompletionStatus, getRalphContext, readPrd, getStory, markStoryIncomplete, consumeStoryArchitectApproval, consumeCompletionArchitectApproval, getPrdGoverningCriteriaRevision, readVerificationState, startVerification, recordArchitectFeedback, getArchitectVerificationPrompt, getArchitectRejectionContinuationPrompt, detectArchitectApproval, detectArchitectRejection, clearVerificationState, consumeVerificationRequest, restoreVerificationRequestIfAbsent, } from '../ralph/index.js';
+import { applyRalphVerdictShadow } from '../ralph/jev-shadow.js';
 import { checkIncompleteTodos, getNextPendingTodo, isUserAbort, isContextLimitStop, isRateLimitStop, isExplicitCancelCommand, isAuthenticationError, isScheduledWakeupStop, isOversizeToolResultRedirectStop } from '../todo-continuation/index.js';
 import { TODO_CONTINUATION_PROMPT } from '../../installer/hooks.js';
 import { isAutopilotActive, } from '../autopilot/index.js';
@@ -841,6 +842,18 @@ function checkArchitectRejectionInTranscript(sessionId) {
     return { rejected: false, feedback: '' };
 }
 /**
+ * Bounded criteria excerpt for the ralph-verdict Jev shadow point: the story
+ * under review's acceptance criteria, or every PRD story's criteria for
+ * completion-scope verification. The resolver bounds the string before
+ * send/log.
+ */
+function verificationCriteriaExcerpt(workingDir, sessionId, story) {
+    const criteria = story?.acceptanceCriteria
+        ?? readPrd(workingDir, sessionId)?.userStories.flatMap(s => s.acceptanceCriteria)
+        ?? [];
+    return criteria.join('; ');
+}
+/**
  * Check Ralph Loop state and determine if it should continue
  * Now includes Architect verification for completion claims
  */
@@ -943,6 +956,14 @@ async function checkRalphLoop(sessionId, directory, cancelInProgress) {
             if (sessionId) {
                 // Check for architect approval
                 if (checkArchitectApprovalInTranscript(sessionId, verificationState)) {
+                    // Jev ralph-verdict shadow: the detected approval is the twin; the
+                    // verdict flow below is unchanged with and without a Jev key.
+                    await applyRalphVerdictShadow({
+                        verdict: true,
+                        prdContext: verificationCriteriaExcerpt(workingDir, sessionId, verifiedStory),
+                        claim: verificationState.completion_claim,
+                        criticMode: verificationState.critic_mode,
+                    });
                     if (verificationState.verification_scope === 'story' && verificationState.story_id) {
                         const consumed = consumeStoryArchitectApproval(workingDir, verificationState.story_id, verificationState.criteria_revision ?? '', sessionId, undefined, undefined, () => consumeVerificationRequest(workingDir, verificationState.request_id, sessionId));
                         if (!consumed) {
@@ -1023,6 +1044,14 @@ async function checkRalphLoop(sessionId, directory, cancelInProgress) {
                 // Check for architect rejection
                 const rejection = checkArchitectRejectionInTranscript(sessionId);
                 if (verificationState && rejection.rejected) {
+                    // Jev ralph-verdict shadow: the detected rejection is the twin; the
+                    // feedback flow below is unchanged with and without a Jev key.
+                    await applyRalphVerdictShadow({
+                        verdict: false,
+                        prdContext: verificationCriteriaExcerpt(workingDir, sessionId, verifiedStory),
+                        claim: verificationState.completion_claim,
+                        criticMode: verificationState.critic_mode,
+                    });
                     if (verificationState.verification_scope === 'story' && verificationState.story_id) {
                         markStoryIncomplete(workingDir, verificationState.story_id, rejection.feedback, sessionId);
                     }
